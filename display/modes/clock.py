@@ -21,6 +21,9 @@ _bitmap = None
 _palette = None
 _last_minute = -1
 _colon_on = True
+_prev_digits = None   # (h1, h2, m1, m2, ampm) from last draw
+_prev_date = None      # date string from last draw
+_digit_positions = []  # list of (x, y, width, height) for each digit slot
 
 # Large 8x12 digit font for clock display (row-encoded, 8 bits wide, MSB=left)
 DIGITS_8x12 = {
@@ -130,19 +133,23 @@ def _unix_to_local(unix_ts):
 
 def update_timezone(tz):
     """Update timezone offset and force redraw."""
-    global TZ_OFFSET, _last_minute
+    global TZ_OFFSET, _last_minute, _prev_digits, _prev_date
     TZ_OFFSET = tz
     _last_minute = -1
+    _prev_digits = None
+    _prev_date = None
     print(f"Clock timezone updated: UTC{tz:+d}")
 
 
 def setup(bitmap, palette, **kwargs):
     """Initialize clock mode."""
-    global _bitmap, _palette, _last_minute
+    global _bitmap, _palette, _last_minute, _prev_digits, _prev_date
 
     _bitmap = bitmap
     _palette = palette
     _last_minute = -1
+    _prev_digits = None
+    _prev_date = None
 
     # Set up colors
     palette[COLOR_BLACK] = 0x000000
@@ -165,9 +172,17 @@ def setup(bitmap, palette, **kwargs):
     print(f"Clock mode: UTC{TZ_OFFSET:+d}")
 
 
+def _clear_rect(x, y, w, h):
+    """Clear a rectangular region to black."""
+    for py in range(y, y + h):
+        for px in range(x, x + w):
+            if 0 <= px < WIDTH and 0 <= py < HEIGHT:
+                _bitmap[px, py] = 0
+
+
 def animate(bitmap):
     """Update clock display. Returns sleep time."""
-    global _last_minute
+    global _last_minute, _prev_digits, _prev_date
 
     now_unix = time.time() + EPOCH_OFFSET
     year, month, day, hour, minute, second, weekday = _unix_to_local(now_unix)
@@ -177,13 +192,7 @@ def animate(bitmap):
         return 0.5
     _last_minute = minute
 
-    # Clear display
-    for y in range(HEIGHT):
-        for x in range(WIDTH):
-            bitmap[x, y] = 0
-
-    # --- Draw time (large digits) ---
-    # 12-hour format
+    # --- Compute current digits ---
     display_hour = hour % 12
     if display_hour == 0:
         display_hour = 12
@@ -193,64 +202,136 @@ def animate(bitmap):
     h2 = str(display_hour % 10)
     m1 = str(minute // 10)
     m2 = str(minute % 10)
+    ampm = "PM" if is_pm else "AM"
+    cur_digits = (h1, h2, m1, m2, ampm)
 
-    # Layout: [H1] H2 : M1 M2  AM/PM
-    # Each large digit is 8px wide, colon is 4px, gaps are 2px
-    # AM/PM in small font ~12px
+    # --- Layout constants ---
     digit_w = 8
+    digit_h = 12
     gap = 2
     colon_w = 4
+    ampm_gap = 3
+    ampm_w = 14
+    time_y = 3
+    time_color = 3
 
     if h1:
         time_w = digit_w + gap + digit_w + gap + colon_w + gap + digit_w + gap + digit_w
     else:
         time_w = digit_w + gap + colon_w + gap + digit_w + gap + digit_w
 
-    # Add space for AM/PM (about 14px)
-    ampm_gap = 3
-    ampm_w = 14
     total_w = time_w + ampm_gap + ampm_w
+    base_x = (WIDTH - total_w) // 2
 
-    time_y = 3  # top area for time
-    x = (WIDTH - total_w) // 2
-
-    time_color = 3  # cyan
+    # --- Compute x positions for each slot ---
+    x = base_x
+    positions = []  # (x, digit_char) for h1, h2, m1, m2
 
     if h1:
-        _draw_large_digit(x, time_y, h1, time_color)
+        positions.append(x)  # h1 position
         x += digit_w + gap
-    _draw_large_digit(x, time_y, h2, time_color)
+    else:
+        positions.append(None)  # no h1
+
+    positions.append(x)  # h2 position
     x += digit_w + gap
 
-    # Solid colon
-    _draw_colon(x, time_y, time_color)
+    colon_x = x
     x += colon_w + gap
 
-    _draw_large_digit(x, time_y, m1, time_color)
+    positions.append(x)  # m1 position
     x += digit_w + gap
-    _draw_large_digit(x, time_y, m2, time_color)
+    positions.append(x)  # m2 position
     x += digit_w
 
-    # AM/PM indicator
-    ampm = "PM" if is_pm else "AM"
-    _draw_small_text(x + ampm_gap, time_y + 3, ampm, 4)
+    ampm_x = x + ampm_gap
 
-    # --- Draw date (small text, bottom) ---
+    # --- First draw: full render ---
+    if _prev_digits is None:
+        # Clear entire display
+        for y in range(HEIGHT):
+            for px in range(WIDTH):
+                bitmap[px, y] = 0
+
+        # Draw all digits
+        if h1 and positions[0] is not None:
+            _draw_large_digit(positions[0], time_y, h1, time_color)
+        _draw_large_digit(positions[1], time_y, h2, time_color)
+        _draw_colon(colon_x, time_y, time_color)
+        _draw_large_digit(positions[2], time_y, m1, time_color)
+        _draw_large_digit(positions[3], time_y, m2, time_color)
+        _draw_small_text(ampm_x, time_y + 3, ampm, 4)
+
+        # Draw date
+        day_name = DAYS[weekday]
+        month_name = MONTHS[month - 1]
+        date_str = f"{day_name} {month_name} {day}"
+        from font_data import FONT_5x7
+        text_w = 0
+        for ch in date_str:
+            glyph = FONT_5x7.get(ch, FONT_5x7.get(" "))
+            if glyph:
+                text_w += len(glyph) + 1
+        text_w -= 1
+        date_x = (WIDTH - text_w) // 2
+        date_y = 22
+        _draw_small_text(date_x, date_y, date_str, 4)
+
+        _prev_digits = cur_digits
+        _prev_date = date_str
+        return 0.5
+
+    # --- Incremental update: only redraw changed parts ---
+    prev_h1, prev_h2, prev_m1, prev_m2, prev_ampm = _prev_digits
+
+    # Check if h1 presence changed (e.g. 12:59 -> 1:00)
+    h1_changed = (h1 != prev_h1)
+    if h1_changed and (bool(h1) != bool(prev_h1)):
+        # Layout shift — full redraw needed
+        _prev_digits = None
+        _prev_date = None
+        _last_minute = -1  # force re-entry
+        return 0.05
+
+    # Update only changed digits
+    if h1 != prev_h1 and positions[0] is not None:
+        _clear_rect(positions[0], time_y, digit_w, digit_h)
+        if h1:
+            _draw_large_digit(positions[0], time_y, h1, time_color)
+
+    if h2 != prev_h2:
+        _clear_rect(positions[1], time_y, digit_w, digit_h)
+        _draw_large_digit(positions[1], time_y, h2, time_color)
+
+    if m1 != prev_m1:
+        _clear_rect(positions[2], time_y, digit_w, digit_h)
+        _draw_large_digit(positions[2], time_y, m1, time_color)
+
+    if m2 != prev_m2:
+        _clear_rect(positions[3], time_y, digit_w, digit_h)
+        _draw_large_digit(positions[3], time_y, m2, time_color)
+
+    if ampm != prev_ampm:
+        _clear_rect(ampm_x, time_y + 3, ampm_w, 7)
+        _draw_small_text(ampm_x, time_y + 3, ampm, 4)
+
+    # Update date if day changed
     day_name = DAYS[weekday]
     month_name = MONTHS[month - 1]
     date_str = f"{day_name} {month_name} {day}"
+    if date_str != _prev_date:
+        # Clear date row and redraw
+        _clear_rect(0, 22, WIDTH, 8)
+        from font_data import FONT_5x7
+        text_w = 0
+        for ch in date_str:
+            glyph = FONT_5x7.get(ch, FONT_5x7.get(" "))
+            if glyph:
+                text_w += len(glyph) + 1
+        text_w -= 1
+        date_x = (WIDTH - text_w) // 2
+        _draw_small_text(date_x, 22, date_str, 4)
+        _prev_date = date_str
 
-    from font_data import FONT_5x7
-    # Measure text width
-    text_w = 0
-    for ch in date_str:
-        glyph = FONT_5x7.get(ch, FONT_5x7.get(" "))
-        if glyph:
-            text_w += len(glyph) + 1
-    text_w -= 1  # remove trailing spacer
-
-    date_x = (WIDTH - text_w) // 2
-    date_y = 22  # bottom row
-    _draw_small_text(date_x, date_y, date_str, 4)
-
+    _prev_digits = cur_digits
     return 0.5

@@ -167,12 +167,14 @@ Each row shows:
 - **Destination** name
 - **Arrival time** in minutes (right-aligned)
 
-## Holiday Modes
+## Display Modes
 
-The display includes 8 animated holiday modes, all built in and switchable instantly via the [web interface](#mode-switching-via-web-interface). No file swapping or reboot needed — just tap a button. Holiday animations run entirely offline (no Wi-Fi needed after the initial connection).
+The display includes a clock, weather display, and 8 animated holiday modes — all switchable instantly via the [web interface](#mode-switching-via-web-interface). No file swapping or reboot needed — just tap a button.
 
-| Holiday | Mode File | Animation |
-|---------|-----------|-----------|
+| Mode | Mode File | Description |
+|------|-----------|-------------|
+| 🕐 Clock | `modes/clock.py` | Large digital clock with date — timezone auto-detected from zip code |
+| 🌤️ Weather | `modes/weather.py` | Current temperature, high/low, conditions icon, and location via Open-Meteo API |
 | 🏖️ Beach Day | `modes/beachday.py` | Scrolling ocean waves, sun, sand, and colorful beach umbrellas |
 | 🎄 Christmas | `modes/christmas.py` | Falling snowflakes and Christmas trees with blinking lights |
 | 🎃 Halloween | `modes/halloween.py` | Bobbing spiders on web threads and animated bats |
@@ -186,12 +188,14 @@ Each banner displays a centered holiday greeting with animated elements around t
 
 | | | |
 |:---:|:---:|:---:|
+| ![Clock](imgs/clock.png) | ![Weather](imgs/weather.png) | ![Subway Tracker](imgs/subwaytracker.png) |
+| Clock | Weather | Train Sign |
 | ![Beach Day](imgs/beachday.png) | ![Christmas](imgs/christmas.png) | ![Halloween](imgs/halloween.png) |
 | Beach Day | Christmas | Halloween |
 | ![4th of July](imgs/4thofjuly.png) | ![New Year](imgs/newyear.png) | ![St. Patrick's Day](/imgs/stpaddys.png) |
 | 4th of July | New Year | St. Patrick's Day |
-| ![Thanksgiving](imgs/thanksgiving.png) | ![Valentine's Day](imgs/valentines.png) | ![Subway Tracker](imgs/subwaytracker.png) |
-| Thanksgiving | Valentine's Day | Train Sign |
+| ![Thanksgiving](imgs/thanksgiving.png) | ![Valentine's Day](imgs/valentines.png) | |
+| Thanksgiving | Valentine's Day | |
 
 ### Mode Switching via Web Interface
 
@@ -207,8 +211,6 @@ Tap any button to instantly switch between the live train sign and holiday anima
 > **Tip:** If `display.local` doesn't resolve, use the board's IP address (printed to the serial console on boot).
 
 ### Loading Screen
-
-![Loading Screen](imgs/loadingscreen.png)
 
 Shown briefly on boot while connecting to Wi-Fi and fetching the first batch of arrivals.
 
