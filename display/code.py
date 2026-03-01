@@ -190,6 +190,12 @@ def _load_mode_module(mode_name):
         elif mode_name == "beachday":
             from modes import beachday
             return beachday
+        elif mode_name == "clock":
+            from modes import clock
+            return clock
+        elif mode_name == "weather":
+            from modes import weather
+            return weather
         else:
             print(f"Unknown mode: {mode_name}")
             return None
@@ -221,11 +227,19 @@ def _activate_mode(mode_name):
     _clear_bitmap()
     wdt.feed()
 
-    # Train mode needs pool for HTTP; holiday modes don't
-    if mode_name == "train":
+    # Train and weather modes need pool for HTTP; others don't
+    if mode_name in ("train", "weather"):
         mod.setup(bitmap, palette, pool=pool)
     else:
         mod.setup(bitmap, palette)
+
+    # If activating weather, push current zip from web_server
+    if mode_name == "weather":
+        mod.update_config(zip_code=web_server._zip_code)
+
+    # If activating clock and we have a detected timezone, push it
+    if mode_name == "clock" and _detected_tz is not None:
+        mod.update_timezone(_detected_tz)
 
     gc.collect()
     return mod
@@ -235,6 +249,9 @@ def _activate_mode(mode_name):
 # Start HTTP server for mode switching
 # ---------------------------------------------------------------
 web_server.start(pool)
+
+# Auto-detected timezone from weather API (shared between clock/weather)
+_detected_tz = None
 
 # ---------------------------------------------------------------
 # Load initial mode
@@ -256,6 +273,15 @@ while True:
         if "stops" in action:
             if current_mode_name == "train" and current_module is not None:
                 current_module.update_stops(action["stops"])
+
+        # Handle settings change (zip code)
+        if "settings" in action:
+            s = action["settings"]
+            if "zip" in s:
+                # Try to push to weather module if it's loaded
+                import sys
+                if "modes.weather" in sys.modules:
+                    sys.modules["modes.weather"].update_config(zip_code=s["zip"])
 
         # Handle mode switch
         new_mode = action.get("mode")
@@ -280,6 +306,13 @@ while True:
         except Exception as e:
             print(f"Animate error: {e}")
             sleep_time = 1.0
+
+        # Sync auto-detected timezone from weather module
+        if current_mode_name == "weather":
+            tz = current_module.get_tz_offset()
+            if tz is not None and tz != _detected_tz:
+                _detected_tz = tz
+                print(f"Auto-detected timezone: UTC{tz:+d}")
     else:
         sleep_time = 1.0
 

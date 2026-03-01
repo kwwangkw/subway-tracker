@@ -17,6 +17,8 @@ _mdns_server = None  # must keep a reference so it doesn't get GC'd
 # Available modes — label shown on the web page
 MODES = [
     ("train", "🚇 Train Sign"),
+    ("clock", "🕐 Clock"),
+    ("weather", "🌤️ Weather"),
     ("halloween", "🎃 Halloween"),
     ("christmas", "🎄 Christmas"),
     ("thanksgiving", "🦃 Thanksgiving"),
@@ -31,15 +33,22 @@ MODES = [
 _stops_config = []  # list of strings like ["721:7:N", "G24:G:S"]
 _pending_stops = None  # set by poll(), consumed by code.py
 
+# Clock/weather settings — initialized from settings.toml, changeable via web
+_zip_code = "10001"
+
 
 def start(pool, port=80):
     """Start the HTTP server on the given port. Returns True if successful."""
     global _server_socket, _pool, _mdns_server, _stops_config
+    global _zip_code
     _pool = pool
 
     # Initialize stops from settings.toml
     stops_str = os.getenv("MTA_STOPS", "")
     _stops_config[:] = [s.strip() for s in stops_str.split(",") if s.strip()]
+
+    # Initialize weather zip from settings.toml
+    _zip_code = os.getenv("WEATHER_ZIP", "10001")
 
     # Set up mDNS so http://display.local works
     try:
@@ -70,6 +79,7 @@ def poll(current_mode):
     Returns dict with optional keys:
         "mode" — new mode name to switch to
         "stops" — new list of stop config strings
+        "settings" — dict with changed settings (zip)
     Returns None if no actionable request.
     """
     if _server_socket is None:
@@ -103,7 +113,7 @@ def poll(current_mode):
                 else:
                     _send_response(client, 404, "Not Found",
                                    body="Unknown mode")
-            elif path == "/stops" and method == "POST":
+            elif path in ("/stops", "/settings") and method == "POST":
                 # Get the body — may need a second recv if headers were long
                 body = ""
                 if "\r\n\r\n" in request:
@@ -116,11 +126,16 @@ def poll(current_mode):
                             body = buf2[:s2].decode("utf-8")
                     except Exception:
                         pass
-                new_stops = _parse_stops_form(body)
-                if new_stops:
-                    _stops_config[:] = new_stops
-                    result = {"stops": list(new_stops)}
-                    print(f"Stops updated: {new_stops}")
+                if path == "/stops":
+                    new_stops = _parse_stops_form(body)
+                    if new_stops:
+                        _stops_config[:] = new_stops
+                        result = {"stops": list(new_stops)}
+                        print(f"Stops updated: {new_stops}")
+                else:
+                    settings = _parse_settings_form(body)
+                    if settings:
+                        result = {"settings": settings}
                 _send_response(client, 303, "See Other",
                                headers="Location: /\r\n")
             else:
@@ -177,6 +192,31 @@ def _parse_stops_form(body):
             new_stops.append(entry)
 
     return new_stops if new_stops else None
+
+
+def _parse_settings_form(body):
+    """Parse URL-encoded form body for zip code.
+
+    Returns dict with changed values, or None.
+    """
+    global _zip_code
+    fields = {}
+    for pair in body.split("&"):
+        if "=" in pair:
+            k, v = pair.split("=", 1)
+            fields[k] = v.replace("+", " ").strip()
+
+    changed = {}
+    if "zip" in fields and fields["zip"]:
+        new_zip = fields["zip"]
+        if new_zip != _zip_code:
+            _zip_code = new_zip
+            changed["zip"] = new_zip
+
+    if changed:
+        print(f"Settings updated: {changed}")
+        return changed
+    return None
 
 
 def _send_response(client, code, reason, body="", headers="",
@@ -250,6 +290,8 @@ _CSS = (
 
 _LABELS = {
     "train": "Train Sign",
+    "clock": "Clock",
+    "weather": "Weather",
     "halloween": "Halloween",
     "christmas": "Christmas",
     "thanksgiving": "Thanksgiving",
@@ -288,6 +330,17 @@ def _send_page(client, current_mode):
     parts.append('" placeholder="721:7:N,G24:G:S"></div>')
     parts.append('<div class="hint">STOP:LINE:DIR comma-separated — nearest 2 arrivals shown</div>')
     parts.append('<button type="submit" class="sb">Update Stations</button>')
+    parts.append("</form>")
+
+    # --- Clock/Weather settings form ---
+    parts.append("<h2>Settings</h2>")
+    parts.append('<form method="POST" action="/settings">')
+    parts.append('<div class="row"><label>Zip Code</label>')
+    parts.append('<input name="zip" value="')
+    parts.append(_zip_code)
+    parts.append('" placeholder="10001"></div>')
+    parts.append('<div class="hint">Sets weather location and auto-detects timezone for clock</div>')
+    parts.append('<button type="submit" class="sb">Update Settings</button>')
     parts.append("</form>")
 
     # --- Mode buttons ---
