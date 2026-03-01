@@ -2,7 +2,7 @@
 
 Real-time NYC subway arrival display powered by an **Adafruit MatrixPortal S3** and two chained **64×32 HUB75 LED matrices** (128×32 total).
 
-![Subway Tracker Display](/imgs/subwaytracker.png)
+![Subway Tracker Display](/imgs/titlepic.png)
 
 ## Hardware
 
