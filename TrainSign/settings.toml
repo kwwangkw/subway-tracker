@@ -13,13 +13,13 @@ CIRCUITPY_WIFI_PASSWORD = "YOUR_WIFI_PASSWORD"
 #   direction = N (northbound) or S (southbound) (optional — omit for both)
 #
 # Examples:
-#   "721:7:S"            = 7 train southbound at Vernon Blvd-Jackson Av
-#   "G29:G:N"            = G train northbound at 21 St
+#   "721:7:N"            = 7 train Manhattan-bound at Vernon Blvd-Jackson Av
+#   "G24:G:S"            = G train Brooklyn-bound at 21 St
 #   "G22"                = any line, any direction at Court Sq
-#   "721:7:S,G29:G:N"    = both of the above
+#   "721:7:N,G24:G:S"    = both of the above
 #
 # The soonest arrivals across all configs fill rows 1 and 2.
-MTA_STOPS = "721:7:S,G29:G:N"
+MTA_STOPS = "721:7:N,G24:G:S"
 
 # How often to refresh data (seconds)
 MTA_REFRESH_INTERVAL = "30"
