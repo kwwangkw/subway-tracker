@@ -5,8 +5,27 @@
 # protobuf library, so we do minimal manual parsing of the binary format to
 # extract trip_update → stop_time_update entries for our target stop.
 
+import gc
 import time
 import os
+
+# CircuitPython's time.time() returns seconds since Jan 1, 2000 (Y2K epoch).
+# MTA feeds use Unix timestamps (seconds since Jan 1, 1970).
+# Offset = 946684800 seconds (30 years).
+# We add this to time.time() to get a Unix-compatible timestamp.
+try:
+    # On CPython, time.time() already returns Unix epoch — no offset needed
+    if time.time() > 1_000_000_000:
+        EPOCH_OFFSET = 0
+    else:
+        EPOCH_OFFSET = 946684800
+except Exception:
+    EPOCH_OFFSET = 946684800
+
+
+def _now_unix():
+    """Return current time as a Unix timestamp (seconds since 1970)."""
+    return time.time() + EPOCH_OFFSET
 
 # GTFS-RT feed URLs by line group (no API key required)
 FEED_URLS = {
@@ -33,28 +52,6 @@ LINE_TO_FEED = {}
 for group, url in FEED_URLS.items():
     for ch in group:
         LINE_TO_FEED[ch] = group
-
-
-def get_feed_urls_for_stop(stop_id):
-    """
-    Given a stop_id like 'G22', determine which GTFS-RT feeds might serve it.
-    Since we don't know which lines serve a stop without static GTFS, we fetch
-    all feeds for the configured lines. If lines_filter is set in settings,
-    we only fetch those feeds.
-    Returns a list of feed URLs to query.
-    """
-    # If user has configured specific lines, only fetch those feeds
-    lines_filter = os.getenv("MTA_LINES_FILTER", "")
-    if lines_filter:
-        groups = set()
-        for line in lines_filter.split(","):
-            line = line.strip().upper()
-            if line in LINE_TO_FEED:
-                groups.add(LINE_TO_FEED[line])
-        return [FEED_URLS[g] for g in groups if g in FEED_URLS]
-
-    # Default: fetch all feeds (works but slower)
-    return list(FEED_URLS.values())
 
 
 # ---------------------------------------------------------------
@@ -122,15 +119,16 @@ def _iter_fields(data):
 def _parse_stop_time_update(data):
     """
     Parse a StopTimeUpdate message.
-    Field 3: stop_id (string)
+    Field 4: stop_id (string)
     Field 2: arrival (StopTimeEvent)
-      Field 2.1: time (int64 as varint in some feeds, or fixed64)
+      Field 2.2: time (int64 as varint in some feeds, or fixed64)
+    Field 3: departure (StopTimeEvent) — used as fallback for arrival time
     """
     stop_id = None
     arrival_time = None
 
     for fn, wt, val in _iter_fields(data):
-        if fn == 3 and wt == LENGTH_DELIMITED:
+        if fn == 4 and wt == LENGTH_DELIMITED:
             # stop_id
             try:
                 stop_id = val.decode("utf-8")
@@ -145,6 +143,14 @@ def _parse_stop_time_update(data):
                     elif swt == FIXED64:
                         # little-endian int64
                         arrival_time = int.from_bytes(sval, "little")
+        elif fn == 3 and wt == LENGTH_DELIMITED and arrival_time is None:
+            # departure StopTimeEvent — fallback if no arrival time
+            for sfn, swt, sval in _iter_fields(val):
+                if sfn == 2:  # time field
+                    if swt == VARINT:
+                        arrival_time = sval
+                    elif swt == FIXED64:
+                        arrival_time = int.from_bytes(sval, "little")
 
     return stop_id, arrival_time
 
@@ -155,11 +161,13 @@ def _parse_trip_update(data):
     Field 1: trip descriptor (TripDescriptor)
       Field 1.1: trip_id (string) — contains route info
       Field 1.5: route_id (string)
-    Field 2: stop_time_update (repeated)
+    Field 2: stop_time_update (repeated) — NOT collected, iterate raw data instead
+
+    Returns (route_id, trip_id, raw_data) — caller iterates field 2 entries
+    lazily via _iter_stop_time_updates(raw_data) to avoid list allocation.
     """
     route_id = None
     trip_id = None
-    stop_time_updates = []
 
     for fn, wt, val in _iter_fields(data):
         if fn == 1 and wt == LENGTH_DELIMITED:
@@ -175,10 +183,17 @@ def _parse_trip_update(data):
                         route_id = sval.decode("utf-8")
                     except Exception:
                         pass
-        elif fn == 2 and wt == LENGTH_DELIMITED:
-            stop_time_updates.append(val)
+            break  # field 1 comes first; stop here, don't scan field 2s
 
-    return route_id, trip_id, stop_time_updates
+    return route_id, trip_id, data
+
+
+def _iter_stop_time_updates(trip_update_data):
+    """Yield each StopTimeUpdate (field 2) from raw TripUpdate data.
+    Generator — no list allocated."""
+    for fn, wt, val in _iter_fields(trip_update_data):
+        if fn == 2 and wt == LENGTH_DELIMITED:
+            yield val
 
 
 def _parse_feed_entity(data):
@@ -196,15 +211,14 @@ def _parse_feed_entity(data):
 
 def _parse_feed_message(data):
     """
-    Parse the top-level FeedMessage.
+    Parse the top-level FeedMessage as a generator.
     Field 1: header (FeedHeader) — skip
     Field 2: entity (repeated FeedEntity)
+    Yields entity data one at a time to avoid holding all in memory.
     """
-    entities = []
     for fn, wt, val in _iter_fields(data):
         if fn == 2 and wt == LENGTH_DELIMITED:
-            entities.append(val)
-    return entities
+            yield val
 
 
 def _direction_from_stop(stop_id_full):
@@ -342,227 +356,6 @@ def get_destination(route_id, direction):
     return route.get(direction, direction)
 
 
-def fetch_arrivals(requests_session, stop_id, max_results=4):
-    """
-    Fetch upcoming arrivals for a given stop_id.
-
-    Args:
-        requests_session: An adafruit_requests.Session (or compatible) object.
-        stop_id: Base stop ID (e.g., 'G22'). Both N and S variants are checked.
-        max_results: Maximum number of arrivals to return.
-
-    Returns:
-        List of dicts with keys:
-            - route_id: str (e.g., '7', 'G')
-            - direction: str ('N' or 'S')
-            - destination: str (human-readable)
-            - arrival_time: int (unix timestamp)
-            - minutes: int (minutes until arrival)
-    """
-    now = time.time()
-    stop_n = stop_id + "N"
-    stop_s = stop_id + "S"
-    target_stops = {stop_n, stop_s}
-
-    arrivals = []
-    feed_urls = get_feed_urls_for_stop(stop_id)
-
-    for url in feed_urls:
-        try:
-            response = requests_session.get(url)
-            data = response.content
-            response.close()
-        except Exception as e:
-            print(f"Error fetching {url}: {e}")
-            continue
-
-        try:
-            entities = _parse_feed_message(data)
-        except Exception as e:
-            print(f"Error parsing feed: {e}")
-            continue
-
-        for entity_data in entities:
-            trip_update_data = _parse_feed_entity(entity_data)
-            if trip_update_data is None:
-                continue
-
-            route_id, trip_id, stop_time_updates = _parse_trip_update(
-                trip_update_data
-            )
-
-            if route_id is None and trip_id:
-                # Try to extract route from trip_id
-                # Format is often like "064350_7..N03R" → route is "7"
-                parts = trip_id.split("_")
-                if len(parts) >= 2:
-                    route_part = parts[1].split(".")[0]
-                    if route_part:
-                        route_id = route_part
-
-            if route_id is None:
-                continue
-
-            for stu_data in stop_time_updates:
-                stu_stop_id, stu_arrival = _parse_stop_time_update(stu_data)
-                if stu_stop_id not in target_stops:
-                    continue
-                if stu_arrival is None:
-                    continue
-                if stu_arrival < now:
-                    continue  # Already passed
-
-                direction = _direction_from_stop(stu_stop_id)
-                minutes = int((stu_arrival - now) / 60)
-
-                arrivals.append({
-                    "route_id": route_id,
-                    "direction": direction,
-                    "destination": get_destination(route_id, direction),
-                    "arrival_time": stu_arrival,
-                    "minutes": minutes,
-                })
-
-    # Sort by arrival time
-    arrivals.sort(key=lambda a: a["arrival_time"])
-
-    return arrivals[:max_results]
-
-
-def parse_row_config(config_str):
-    """
-    Parse a row config string like '721:7:S' into components.
-    Format: stop_id[:line[:direction]]
-    Returns (stop_id, line_filter, direction_filter).
-    line_filter and direction_filter may be None.
-    """
-    parts = config_str.strip().split(":")
-    stop_id = parts[0]
-    line_filter = parts[1].upper() if len(parts) > 1 else None
-    direction_filter = parts[2].upper() if len(parts) > 2 else None
-    return stop_id, line_filter, direction_filter
-
-
-def fetch_arrivals_multi(requests_session, row_configs, max_results=4):
-    """
-    Fetch upcoming arrivals from multiple stop/line/direction configs.
-    Merges results from all configs, sorted by soonest arrival.
-
-    Args:
-        requests_session: An adafruit_requests.Session (or compatible).
-        row_configs: list of config strings, e.g. ['721:7:S', 'G29:G:N']
-        max_results: Maximum number of arrivals to return.
-
-    Returns:
-        List of dicts (same format as fetch_arrivals).
-    """
-    now = time.time()
-
-    # Parse configs and figure out which feeds we need
-    parsed = []  # list of (stop_id, line_filter, direction_filter)
-    feeds_needed = set()  # set of feed URLs to fetch
-    for cfg in row_configs:
-        stop_id, line_filter, dir_filter = parse_row_config(cfg)
-        parsed.append((stop_id, line_filter, dir_filter))
-        if line_filter and line_filter in LINE_TO_FEED:
-            group = LINE_TO_FEED[line_filter]
-            feeds_needed.add(FEED_URLS[group])
-        else:
-            # Unknown line — fetch all feeds
-            feeds_needed.update(FEED_URLS.values())
-
-    # Build target stop sets per config
-    # Each entry: ({stop_n, stop_s}, line_filter, dir_filter)
-    targets = []
-    for stop_id, line_filter, dir_filter in parsed:
-        stop_set = set()
-        if dir_filter == "N":
-            stop_set.add(stop_id + "N")
-        elif dir_filter == "S":
-            stop_set.add(stop_id + "S")
-        else:
-            stop_set.add(stop_id + "N")
-            stop_set.add(stop_id + "S")
-        targets.append((stop_set, line_filter, dir_filter))
-
-    # All target stop IDs (union) for quick filtering
-    all_target_stops = set()
-    for stop_set, _, _ in targets:
-        all_target_stops.update(stop_set)
-
-    arrivals = []
-
-    for url in feeds_needed:
-        try:
-            response = requests_session.get(url)
-            data = response.content
-            response.close()
-        except Exception as e:
-            print(f"Error fetching {url}: {e}")
-            continue
-
-        try:
-            entities = _parse_feed_message(data)
-        except Exception as e:
-            print(f"Error parsing feed: {e}")
-            continue
-
-        for entity_data in entities:
-            trip_update_data = _parse_feed_entity(entity_data)
-            if trip_update_data is None:
-                continue
-
-            route_id, trip_id, stop_time_updates = _parse_trip_update(
-                trip_update_data
-            )
-
-            if route_id is None and trip_id:
-                parts = trip_id.split("_")
-                if len(parts) >= 2:
-                    route_part = parts[1].split(".")[0]
-                    if route_part:
-                        route_id = route_part
-
-            if route_id is None:
-                continue
-
-            for stu_data in stop_time_updates:
-                stu_stop_id, stu_arrival = _parse_stop_time_update(stu_data)
-                if stu_stop_id not in all_target_stops:
-                    continue
-                if stu_arrival is None:
-                    continue
-                if stu_arrival < now:
-                    continue
-
-                # Check if this matches any of our configs
-                matched = False
-                for stop_set, line_filter, dir_filter in targets:
-                    if stu_stop_id not in stop_set:
-                        continue
-                    if line_filter and route_id.upper() != line_filter:
-                        continue
-                    matched = True
-                    break
-
-                if not matched:
-                    continue
-
-                direction = _direction_from_stop(stu_stop_id)
-                minutes = int((stu_arrival - now) / 60)
-
-                arrivals.append({
-                    "route_id": route_id,
-                    "direction": direction,
-                    "destination": get_destination(route_id, direction),
-                    "arrival_time": stu_arrival,
-                    "minutes": minutes,
-                })
-
-    arrivals.sort(key=lambda a: a["arrival_time"])
-    return arrivals[:max_results]
-
-
 def _parse_row_config(config_str):
     """
     Parse a row config string like 'stop_id:line:direction'.
@@ -579,20 +372,38 @@ def _parse_row_config(config_str):
     return stop_id, line_filter, direction_filter
 
 
-def fetch_arrivals_multi(requests_session, row_configs):
+def fetch_arrivals_multi(requests_session, row_configs, max_results=2):
     """
-    Fetch the soonest arrival for each row config.
+    Fetch upcoming arrivals matching any of the row configs.
+    Returns the soonest `max_results` arrivals sorted by time,
+    merged across all configs.
 
     Args:
         requests_session: An adafruit_requests.Session object.
-        row_configs: list of config strings, e.g. ['721:7:S', 'G29:G:N']
+        row_configs: list of config strings, e.g. ['721:7:N', 'G24:G:S']
+        max_results: max number of arrivals to return.
 
     Returns:
-        List of dicts (one per row config, or None if no arrival found):
+        List of dicts sorted by arrival_time (may be shorter than max_results):
             - route_id, direction, destination, arrival_time, minutes
     """
-    now = time.time()
+    now = _now_unix()
     parsed = [_parse_row_config(c) for c in row_configs]
+
+    # Pre-build target stop IDs for fast lookup during parsing
+    # target_stops maps "721N" -> [(line_filter, dir_filter), ...]
+    target_stops = {}
+    for stop_id, line_filter, direction_filter in parsed:
+        for suffix in ("N", "S"):
+            key = stop_id + suffix
+            if key not in target_stops:
+                target_stops[key] = []
+            target_stops[key].append((line_filter, direction_filter))
+
+    # Keep top arrivals as a sorted list of (arrival_time, route_id, stop_id_full)
+    # We keep at most max_results entries, pruning as we go
+    top = []  # sorted by arrival_time
+    cutoff = None  # arrival time of the last entry in top (for fast rejection)
 
     # Determine which feed URLs we need
     urls_needed = set()
@@ -601,12 +412,10 @@ def fetch_arrivals_multi(requests_session, row_configs):
             group = LINE_TO_FEED[line_filter]
             urls_needed.add(FEED_URLS[group])
         else:
-            # No line filter — need all feeds
             urls_needed.update(FEED_URLS.values())
             break
 
-    # Fetch and parse all needed feeds
-    all_updates = []  # list of (route_id, stop_id_full, arrival_time)
+    # Fetch and parse feeds
     for url in urls_needed:
         try:
             response = requests_session.get(url)
@@ -616,18 +425,12 @@ def fetch_arrivals_multi(requests_session, row_configs):
             print(f"Error fetching {url}: {e}")
             continue
 
-        try:
-            entities = _parse_feed_message(data)
-        except Exception as e:
-            print(f"Error parsing feed: {e}")
-            continue
-
-        for entity_data in entities:
+        for entity_data in _parse_feed_message(data):
             trip_update_data = _parse_feed_entity(entity_data)
             if trip_update_data is None:
                 continue
 
-            route_id, trip_id, stop_time_updates = _parse_trip_update(
+            route_id, trip_id, raw_tu = _parse_trip_update(
                 trip_update_data
             )
 
@@ -641,47 +444,74 @@ def fetch_arrivals_multi(requests_session, row_configs):
             if route_id is None:
                 continue
 
-            for stu_data in stop_time_updates:
+            for stu_data in _iter_stop_time_updates(raw_tu):
                 stu_stop_id, stu_arrival = _parse_stop_time_update(stu_data)
                 if stu_stop_id is None or stu_arrival is None:
                     continue
                 if stu_arrival < now:
                     continue
-                all_updates.append((route_id, stu_stop_id, stu_arrival))
+                # Fast reject: if we already have enough and this is later
+                if cutoff is not None and stu_arrival >= cutoff:
+                    continue
 
-    # Match each row config to the soonest arrival
+                # Check if this stop_id matches any config
+                matches = target_stops.get(stu_stop_id)
+                if matches is None:
+                    continue
+
+                matched = False
+                for line_filter, direction_filter in matches:
+                    if line_filter and route_id.upper() != line_filter:
+                        continue
+                    direction = _direction_from_stop(stu_stop_id)
+                    if direction_filter and direction != direction_filter:
+                        continue
+                    matched = True
+                    break
+
+                if not matched:
+                    continue
+
+                # Check for duplicate (same route + same arrival time)
+                dup = False
+                for t_arr, t_rid, t_sid in top:
+                    if t_arr == stu_arrival and t_rid == route_id:
+                        dup = True
+                        break
+                if dup:
+                    continue
+
+                # Insert into sorted top list
+                inserted = False
+                for j in range(len(top)):
+                    if stu_arrival < top[j][0]:
+                        top.insert(j, (stu_arrival, route_id, stu_stop_id))
+                        inserted = True
+                        break
+                if not inserted:
+                    top.append((stu_arrival, route_id, stu_stop_id))
+
+                # Prune to max_results
+                if len(top) > max_results:
+                    top.pop()
+                if len(top) >= max_results:
+                    cutoff = top[-1][0]
+
+        # Free feed data memory before fetching next feed
+        data = None
+        gc.collect()
+
+    # Build result dicts
     results = []
-    for stop_id, line_filter, direction_filter in parsed:
-        stop_n = stop_id + "N"
-        stop_s = stop_id + "S"
-        best = None
-        for route_id, stu_stop_id, stu_arrival in all_updates:
-            # Must match stop
-            if stu_stop_id != stop_n and stu_stop_id != stop_s:
-                continue
-            # Must match line filter if set
-            if line_filter and route_id.upper() != line_filter:
-                continue
-            # Must match direction filter if set
-            direction = _direction_from_stop(stu_stop_id)
-            if direction_filter and direction != direction_filter:
-                continue
-            # Keep soonest
-            if best is None or stu_arrival < best[2]:
-                best = (route_id, stu_stop_id, stu_arrival)
-
-        if best:
-            route_id, stu_stop_id, stu_arrival = best
-            direction = _direction_from_stop(stu_stop_id)
-            minutes = int((stu_arrival - now) / 60)
-            results.append({
-                "route_id": route_id,
-                "direction": direction,
-                "destination": get_destination(route_id, direction),
-                "arrival_time": stu_arrival,
-                "minutes": minutes,
-            })
-        else:
-            results.append(None)
+    for stu_arrival, route_id, stu_stop_id in top:
+        direction = _direction_from_stop(stu_stop_id)
+        minutes = int((stu_arrival - now) / 60)
+        results.append({
+            "route_id": route_id,
+            "direction": direction,
+            "destination": get_destination(route_id, direction),
+            "arrival_time": stu_arrival,
+            "minutes": minutes,
+        })
 
     return results

@@ -52,11 +52,23 @@ COLOR_DIVIDER = 2
 FIRST_LINE_COLOR = 3  # line colors start here
 
 # Pre-computed circle mask (radius 5, using r²-2 threshold like notebook)
+# Stored as flat list [dx0, dy0, dx1, dy1, ...] to avoid tuple overhead
 _CIRCLE_MASK = []
 for _dy in range(-CIRCLE_RADIUS, CIRCLE_RADIUS + 1):
     for _dx in range(-CIRCLE_RADIUS, CIRCLE_RADIUS + 1):
         if _dx * _dx + _dy * _dy <= (CIRCLE_RADIUS * CIRCLE_RADIUS) - 2:
-            _CIRCLE_MASK.append((_dx, _dy))
+            _CIRCLE_MASK.append(_dx)
+            _CIRCLE_MASK.append(_dy)
+
+
+def _clear_bitmap(bitmap):
+    """Clear the entire bitmap to black."""
+    try:
+        bitmap.fill(0)
+    except AttributeError:
+        for y in range(HEIGHT):
+            for x in range(WIDTH):
+                bitmap[x, y] = 0
 
 
 def _set_pixel(bitmap, x, y, color_index):
@@ -66,9 +78,9 @@ def _set_pixel(bitmap, x, y, color_index):
 
 
 def _draw_circle(bitmap, cx, cy, color_index):
-    """Draw a filled circle using pre-computed mask."""
-    for dx, dy in _CIRCLE_MASK:
-        _set_pixel(bitmap, cx + dx, cy + dy, color_index)
+    """Draw a filled circle using pre-computed flat mask."""
+    for i in range(0, len(_CIRCLE_MASK), 2):
+        _set_pixel(bitmap, cx + _CIRCLE_MASK[i], cy + _CIRCLE_MASK[i + 1], color_index)
 
 
 def _draw_char_5x5(bitmap, x, y, char, color_index):
@@ -85,12 +97,13 @@ def _draw_char_5x5(bitmap, x, y, char, color_index):
                 _set_pixel(bitmap, x + col, y + row, color_index)
 
 
-def _trim_glyph(glyph):
-    """Trim trailing empty (0x00) columns from a 5x7 glyph."""
-    trimmed = list(glyph)
-    while trimmed and trimmed[-1] == 0x00:
-        trimmed.pop()
-    return trimmed
+# Pre-compute trimmed glyphs once at import time to avoid repeated allocations
+_TRIMMED = {}
+for _ch, _glyph in FONT_5x7.items():
+    _t = list(_glyph)
+    while _t and _t[-1] == 0x00:
+        _t.pop()
+    _TRIMMED[_ch] = _t
 
 
 def _draw_char_5x7(bitmap, x, y, char, color_index):
@@ -99,10 +112,11 @@ def _draw_char_5x7(bitmap, x, y, char, color_index):
     Column-encoded: each entry is a column byte, bit 0 = top row.
     Trailing empty columns are trimmed.
     """
-    glyph = FONT_5x7.get(char, FONT_5x7.get(" "))
-    if glyph is None:
+    trimmed = _TRIMMED.get(char)
+    if trimmed is None:
+        trimmed = _TRIMMED.get(" ")
+    if trimmed is None:
         return
-    trimmed = _trim_glyph(glyph)
     for col, byte in enumerate(trimmed):
         for row in range(7):
             if byte & (1 << row):
@@ -113,10 +127,9 @@ def _measure_text(text):
     """Measure the pixel width of a string using variable-width 5x7 font."""
     width = 0
     for ch in text:
-        glyph = FONT_5x7.get(ch, FONT_5x7.get(" "))
-        if glyph is None:
+        trimmed = _TRIMMED.get(ch) or _TRIMMED.get(" ")
+        if trimmed is None:
             continue
-        trimmed = _trim_glyph(glyph)
         width += len(trimmed) + 1  # glyph width + 1px spacing
     return width
 
@@ -125,10 +138,9 @@ def _draw_text(bitmap, x, y, text, color_index):
     """Draw a string using variable-width 5x7 font."""
     cursor_x = x
     for ch in text:
-        glyph = FONT_5x7.get(ch, FONT_5x7.get(" "))
-        if glyph is None:
+        trimmed = _TRIMMED.get(ch) or _TRIMMED.get(" ")
+        if trimmed is None:
             continue
-        trimmed = _trim_glyph(glyph)
         for col, byte in enumerate(trimmed):
             for row in range(7):
                 if byte & (1 << row):
@@ -137,15 +149,19 @@ def _draw_text(bitmap, x, y, text, color_index):
 
 
 def _draw_text_scroll(bitmap, x, y, text, color_index, clip_left, clip_right, scroll_max=0):
-    """Draw scrolling text, writing every pixel in the clip region exactly once.
-    Pixels that aren't part of a glyph are set to black (0) in the same pass,
-    so there's no separate erase step and no flicker.
-    If scroll_max > 0, a second copy of the text is drawn offset by scroll_max
-    to create a seamless looping effect."""
-    # Build a set of lit pixels
-    lit = set()
+    """Draw scrolling text flicker-free with a TRUE single-pass approach.
+    Each pixel in the clip region is written exactly once — either the glyph
+    color or black. No separate clear step, so the display never shows a
+    blank frame between clear and draw.
+    If scroll_max > 0, a second copy is drawn for seamless looping."""
 
-    # Draw text (and optionally a second wrapped copy)
+    # Pre-build a column lookup: for each px in [clip_left, clip_right),
+    # store the glyph column byte (or 0 if blank/spacing).
+    # We process both copies of the text (for seamless wrap).
+    # col_data[px - clip_left] = column byte from font (bits = rows)
+    region_w = clip_right - clip_left
+    col_data = [0] * region_w
+
     copies = [x]
     if scroll_max > 0:
         copies.append(x + scroll_max)
@@ -153,30 +169,34 @@ def _draw_text_scroll(bitmap, x, y, text, color_index, clip_left, clip_right, sc
     for text_x in copies:
         cursor_x = text_x
         for ch in text:
-            glyph = FONT_5x7.get(ch, FONT_5x7.get(" "))
-            if glyph is None:
+            trimmed = _TRIMMED.get(ch) or _TRIMMED.get(" ")
+            if trimmed is None:
                 continue
-            trimmed = _trim_glyph(glyph)
             char_w = len(trimmed)
+            # Skip chars entirely past clip region
             if cursor_x >= clip_right:
                 break
+            # Process chars that overlap the clip region
             if cursor_x + char_w > clip_left:
                 for col, byte in enumerate(trimmed):
                     px = cursor_x + col
                     if clip_left <= px < clip_right:
-                        for row in range(7):
-                            if byte & (1 << row):
-                                lit.add((px, y + row))
-            cursor_x += char_w + 1
+                        col_data[px - clip_left] = byte
+            cursor_x += char_w + 1  # advance by actual width + spacing
 
-    # Single pass: write every pixel in the region exactly once
-    for px in range(clip_left, clip_right):
-        for row in range(7):
-            py = y + row
-            if (px, py) in lit:
-                bitmap[px, py] = color_index
-            else:
-                bitmap[px, py] = 0
+    # Single pass: write every pixel in the clip region exactly once
+    for i in range(region_w):
+        px = clip_left + i
+        byte = col_data[i]
+        if byte:
+            for row in range(7):
+                if byte & (1 << row):
+                    bitmap[px, y + row] = color_index
+                else:
+                    bitmap[px, y + row] = 0
+        else:
+            for row in range(7):
+                bitmap[px, y + row] = 0
 
 
 def _draw_divider(bitmap, y, color_index):
@@ -215,8 +235,7 @@ def _draw_row_static(bitmap, y, line_color_index, line_char, row_index_text, dir
     text_baseline = circle_cy - 2
 
     # Row index label — tight spacing (number + period with no gap)
-    num_glyph = FONT_5x7.get(row_index_text[0], FONT_5x7.get(" "))
-    num_trimmed = _trim_glyph(num_glyph)
+    num_trimmed = _TRIMMED.get(row_index_text[0]) or _TRIMMED.get(" ")
     _draw_text(bitmap, 3, text_baseline, row_index_text[0], COLOR_WHITE)
     # Draw period as single pixel right after number
     _set_pixel(bitmap, 3 + len(num_trimmed) + 1, text_baseline + 4, COLOR_WHITE)
@@ -332,10 +351,7 @@ def update_display_static(bitmap, palette, arrivals):
         palette: displayio.Palette
         arrivals: list of dicts from mta_feed.fetch_arrivals()
     """
-    # Clear the bitmap
-    for y in range(HEIGHT):
-        for x in range(WIDTH):
-            bitmap[x, y] = COLOR_BLACK
+    _clear_bitmap(bitmap)
 
     # Track palette allocations for line colors
     color_map = {}
@@ -378,6 +394,40 @@ def update_display_scroll(bitmap, arrivals, scroll_offsets, scroll_maxes):
             _draw_row_scroll(bitmap, row_y, destination, scroll_offsets[i], scroll_maxes[i], time_text)
 
 
+def update_time_only(bitmap, arrivals):
+    """
+    Redraw ONLY the time text for each row (right-aligned).
+    Clears just the time region, no full screen clear — prevents flicker.
+    """
+    row_positions = [ROW1_Y, ROW2_Y]
+
+    for i, row_y in enumerate(row_positions):
+        if i >= len(arrivals):
+            break
+
+        if row_y == 0:
+            circle_cy = row_y + ROW_H // 2 + 1
+        else:
+            circle_cy = row_y + ROW_H // 2 - 1
+        text_baseline = circle_cy - 2
+
+        time_text = _format_time(arrivals[i]["minutes"])
+        time_width = _measure_text(time_text)
+        time_x = WIDTH - time_width - TIME_MARGIN
+
+        # Clear the time region (from time_x-gap to right edge, 7px tall)
+        # Use a generous left bound to erase any previous wider time text
+        clear_left = WIDTH - _measure_text("99MIN") - TIME_MARGIN - 2
+        for px in range(clear_left, WIDTH):
+            for row in range(7):
+                py = text_baseline + row
+                if 0 <= py < HEIGHT:
+                    bitmap[px, py] = 0
+
+        # Draw new time text
+        _draw_text(bitmap, time_x, text_baseline, time_text, COLOR_WHITE)
+
+
 def update_display(bitmap, palette, arrivals, scroll_offsets=None):
     """
     Legacy full redraw — clears and redraws everything.
@@ -390,10 +440,7 @@ def update_display(bitmap, palette, arrivals, scroll_offsets=None):
             Each dict has: route_id, direction, destination, minutes
         scroll_offsets: list of int scroll offsets per row (or None for static)
     """
-    # Clear the bitmap
-    for y in range(HEIGHT):
-        for x in range(WIDTH):
-            bitmap[x, y] = COLOR_BLACK
+    _clear_bitmap(bitmap)
 
     # Track palette allocations for line colors
     color_map = {}
@@ -429,20 +476,47 @@ def needs_scroll(direction):
 
 
 def draw_loading_screen(bitmap, palette):
-    """Draw a 'Loading...' message on startup."""
-    for y in range(HEIGHT):
-        for x in range(WIDTH):
-            bitmap[x, y] = COLOR_BLACK
+    """Draw a centered 'NYC SUBWAY / LOADING...' message on startup."""
+    _clear_bitmap(bitmap)
 
-    _draw_text(bitmap, 20, 4, "NYC SUBWAY", COLOR_WHITE)
-    _draw_text(bitmap, 28, 16, "LOADING", COLOR_WHITE)
+    line_h = 7
+    gap = 3
+    total_h = line_h * 2 + gap
+    top_y = (HEIGHT - total_h) // 2
+
+    l1 = "NYC SUBWAY"
+    l2 = "LOADING..."  # Center with all 3 dots so it looks balanced
+    l1_x = (WIDTH - _measure_text(l1)) // 2
+    l2_x = (WIDTH - _measure_text(l2)) // 2
+
+    _draw_text(bitmap, l1_x, top_y, l1, COLOR_WHITE)
+    # Only draw "LOADING" initially — dots will animate in
+    _draw_text(bitmap, l2_x, top_y + line_h + gap, "LOADING", COLOR_WHITE)
+
+    # Return info needed for dot animation
+    dots_x = l2_x + _measure_text("LOADING")
+    dots_y = top_y + line_h + gap
+    return dots_x, dots_y
+
+
+def draw_loading_dots(bitmap, dots_x, dots_y, dot_count):
+    """Draw 0-3 dots after 'LOADING' text. Call repeatedly to animate."""
+    dot_w = _measure_text(".")
+    for i in range(3):
+        x = dots_x + i * dot_w
+        # Clear or draw each dot position
+        if i < dot_count:
+            _draw_text(bitmap, x, dots_y, ".", COLOR_WHITE)
+        else:
+            # Erase dot area
+            for dx in range(dot_w):
+                for dy in range(7):
+                    _set_pixel(bitmap, x + dx, dots_y + dy, COLOR_BLACK)
 
 
 def draw_error_screen(bitmap, palette, msg="ERROR"):
     """Draw an error message."""
-    for y in range(HEIGHT):
-        for x in range(WIDTH):
-            bitmap[x, y] = COLOR_BLACK
+    _clear_bitmap(bitmap)
 
     _draw_text(bitmap, 4, 4, "ERROR", COLOR_WHITE)
     # Truncate message
@@ -453,9 +527,7 @@ def draw_error_screen(bitmap, palette, msg="ERROR"):
 
 def draw_no_wifi_screen(bitmap, palette):
     """Draw a 'No WiFi' message centered on screen."""
-    for y in range(HEIGHT):
-        for x in range(WIDTH):
-            bitmap[x, y] = COLOR_BLACK
+    _clear_bitmap(bitmap)
 
     line_h = 7
     gap = 3

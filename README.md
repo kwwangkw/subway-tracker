@@ -63,28 +63,81 @@ Edit `settings.toml` on the CIRCUITPY drive:
 CIRCUITPY_WIFI_SSID     = "YourWiFiName"
 CIRCUITPY_WIFI_PASSWORD = "YourWiFiPassword"
 
-# Your station's GTFS stop ID (see below)
-MTA_STOP_ID = "G22"
+# Comma-separated stop configs: stop_id:line:direction
+# See "Finding Your Stop ID" below
+MTA_STOPS = "721:7:N,G24:G:S"
 
 # Refresh interval in seconds
 MTA_REFRESH_INTERVAL = "30"
 
-# Optional: filter to specific lines (comma-separated)
-# MTA_LINES_FILTER = "7,G"
+# Number of rows to display (max 2 for 128x32)
+MTA_NUM_ROWS = "2"
 ```
+
+The `MTA_STOPS` format is `stop_id:line:direction` where:
+- **stop_id** — GTFS stop ID (e.g. `721`, `G24`)
+- **line** — subway line letter/number to filter (e.g. `7`, `G`). Omit to match any line at that stop.
+- **direction** — `N` (northbound/Queens/Bronx-bound) or `S` (southbound/Brooklyn-bound). Omit for both.
 
 ### Finding Your Stop ID
 
-Stop IDs can be found in the [MTA GTFS static feed](https://rrgtfsfeeds.s3.amazonaws.com/gtfs_subway.zip) (`stops.txt`), or look them up at the [MTA developer resources](https://www.mta.info/developers).
+Each subway station has a GTFS stop ID. The direction suffix (`N` or `S`) is added automatically — you only need the base ID (e.g. `721`, not `721N`).
 
-Common examples:
+#### Method 1: Download the MTA GTFS Static Feed
+
+1. Download the static feed: [google_transit.zip](http://web.mta.info/developers/data/nyct/subway/google_transit.zip)
+2. Unzip and open `stops.txt`
+3. Search for your station name — the `stop_id` column has the ID you need
+4. Rows with `location_type=1` are the parent stations (use that ID)
+
+```bash
+# Quick lookup from the terminal:
+curl -sL http://web.mta.info/developers/data/nyct/subway/google_transit.zip -o /tmp/gtfs.zip
+unzip -o /tmp/gtfs.zip stops.txt -d /tmp/gtfs
+grep -i "your station name" /tmp/gtfs/stops.txt
+```
+
+#### Method 2: MTA Subway Stations Dataset
+
+Browse the [MTA Subway Stations](https://data.ny.gov/Transportation/MTA-Subway-Stations/39hk-dx4f) dataset on NY Open Data — the `GTFS Stop ID` column has the IDs.
+
+#### Common Stop IDs
+
 | Station | Stop ID | Lines |
 |---------|---------|-------|
-| Court Sq | G22 | 7, G |
+| Vernon Blvd-Jackson Av | 721 | 7 |
+| 21 St (Queensbridge) | G24 | G |
+| Court Sq | G22 | G, 7 |
 | Times Sq-42 St | 725 | 1,2,3,7,N,Q,R,W,S |
 | Union Sq-14 St | 635 | 4,5,6,L,N,Q,R,W |
 | Atlantic Ave | 617 | 2,3,4,5,B,D,N,Q,R |
 | Jay St-MetroTech | A41 | A,C,F,R |
+| Bedford-Nostrand Avs | G33 | G |
+| Hoyt-Schermerhorn Sts | A42 | A,C,G |
+
+#### Realtime Feed Groups
+
+Each line's arrivals come from a specific feed. The code handles this automatically, but for reference:
+
+| Feed | Lines |
+|------|-------|
+| `gtfs` | 1, 2, 3, 4, 5, 6, 7 |
+| `gtfs-ace` | A, C, E |
+| `gtfs-bdfm` | B, D, F, M |
+| `gtfs-g` | G |
+| `gtfs-jz` | J, Z |
+| `gtfs-l` | L |
+| `gtfs-nqrw` | N, Q, R, W |
+| `gtfs-si` | SI |
+
+> **Note:** Some stops share IDs across lines (e.g. `A42` appears in both ACE and G feeds). The `:line` filter in your config ensures you only see the line you want.
+
+#### Direction Reference
+
+- **N (Northbound)** — generally toward Manhattan, Uptown, Queens, or the Bronx
+- **S (Southbound)** — generally toward Brooklyn, Downtown, or Coney Island
+
+Check the [MTA map](https://map.mta.info/) if you're unsure which direction you need.
 
 ## How It Works
 
@@ -138,6 +191,44 @@ The `TrainSign.ipynb` notebook is a Pillow-based mock of the LED display for pro
 The `TrainSign/test/` folder contains standalone test files that run on the hardware without Wi-Fi:
 - `code.py` — scrolling display test with sample data
 - `no_wifi_screen.py` — preview of the "No WiFi" error screen
+
+## Debugging via Serial Console
+
+The MatrixPortal S3 outputs debug logs over USB serial. You can connect to it to see real-time status, errors, and arrival data.
+
+### 1. Find the serial port
+
+```bash
+ls /dev/tty.usb*
+```
+
+You should see something like `/dev/tty.usbmodemXXXXX`. The exact name depends on your board.
+
+### 2. Connect with `screen`
+
+```bash
+screen /dev/tty.usbmodem* 115200
+```
+
+Replace `*` with the full device name if multiple USB devices are connected.
+
+### 3. What you'll see
+
+```
+Connecting to WiFi...
+WiFi connected!
+Fetching arrivals...
+Row 0: 7 → 34 St-Hudson Yards  3min
+Row 1: G → Church Av           8min
+```
+
+### 4. Disconnect
+
+Press `Ctrl-A` then `K`, then `Y` to confirm.
+
+> **Tip:** If the serial port doesn't appear, try a different USB-C cable — some cables are charge-only and don't carry data. Also, the port disappears briefly when the board resets.
+
+> **Tip:** You can also press `Ctrl-C` in the serial console to drop into the CircuitPython REPL, and `Ctrl-D` to soft-reboot the board.
 
 ## MTA Data
 

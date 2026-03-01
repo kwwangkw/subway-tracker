@@ -2,8 +2,8 @@
 # Copy this file to the CIRCUITPY drive root as settings.toml
 
 # ----- Wi-Fi credentials -----
-CIRCUITPY_WIFI_SSID     = "YOUR_WIFI_SSID"
-CIRCUITPY_WIFI_PASSWORD = "YOUR_WIFI_PASSWORD"
+CIRCUITPY_WIFI_SSID     = "JARVIS"
+CIRCUITPY_WIFI_PASSWORD = "apartment448$@"
 
 # ----- MTA Station Config -----
 # Comma-separated list of stop configs to monitor.

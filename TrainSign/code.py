@@ -25,12 +25,15 @@ from train_sign import (
     update_display,
     update_display_static,
     update_display_scroll,
+    update_time_only,
     needs_scroll,
     draw_loading_screen,
+    draw_loading_dots,
     draw_error_screen,
     draw_no_wifi_screen,
 )
-from mta_feed import fetch_arrivals, fetch_arrivals_multi, parse_row_config, fetch_arrivals_multi
+import mta_feed
+from mta_feed import fetch_arrivals_multi, _now_unix
 
 # ---------------------------------------------------------------
 # Configuration (from settings.toml)
@@ -78,8 +81,19 @@ display = framebufferio.FramebufferDisplay(matrix, auto_refresh=True)
 group, bitmap, palette = create_display_group(brightness=BRIGHTNESS)
 display.root_group = group
 
-draw_loading_screen(bitmap, palette)
-time.sleep(1)
+dots_x, dots_y = draw_loading_screen(bitmap, palette)
+_dot_count = 0
+
+def _animate_dots():
+    """Advance the loading dots animation by one step."""
+    global _dot_count
+    _dot_count = (_dot_count % 3) + 1
+    draw_loading_dots(bitmap, dots_x, dots_y, _dot_count)
+    time.sleep(0.4)
+
+# Animate dots during startup
+for _ in range(6):
+    _animate_dots()
 
 # ---------------------------------------------------------------
 # Watchdog — auto-reboot if code hangs for > 30 seconds
@@ -100,6 +114,9 @@ try:
         os.getenv("CIRCUITPY_WIFI_PASSWORD"),
     )
     print(f"Connected! IP: {wifi.radio.ipv4_address}")
+    # Keep animating dots while fetching first data
+    for _ in range(3):
+        _animate_dots()
 except Exception as e:
     print(f"WiFi connection failed: {e}")
     draw_no_wifi_screen(bitmap, palette)
@@ -118,11 +135,46 @@ except Exception as e:
             pass
 
 # ---------------------------------------------------------------
-# HTTP session setup
+# NTP time sync — board starts at Jan 1, 2000; we need real time
+# to compare against MTA feed Unix timestamps.
 # ---------------------------------------------------------------
 pool = socketpool.SocketPool(wifi.radio)
+
+print("Syncing time via NTP...")
+wdt.feed()
+try:
+    # Raw NTP query — no extra library needed
+    _ntp_buf = bytearray(48)
+    _ntp_buf[0] = 0x1B  # NTP version 3, client mode
+    _ntp_sock = pool.socket(pool.AF_INET, pool.SOCK_DGRAM)
+    _ntp_sock.settimeout(5)
+    _ntp_sock.sendto(_ntp_buf, ("pool.ntp.org", 123))
+    _ntp_sock.recvfrom_into(_ntp_buf)
+    _ntp_sock.close()
+    # Extract transmit timestamp (bytes 40-43 = seconds since 1900)
+    _ntp_secs = (
+        _ntp_buf[40] << 24 | _ntp_buf[41] << 16 |
+        _ntp_buf[42] << 8  | _ntp_buf[43]
+    )
+    # Convert NTP epoch (1900) to Unix epoch (1970): subtract 70 years
+    _ntp_unix = _ntp_secs - 2208988800
+    # Calculate what time.time() *should* be vs what it *is*
+    # and store the offset so _now_unix() can use it
+    _boot_time = time.time()  # CircuitPython Y2K seconds (small number)
+    mta_feed.EPOCH_OFFSET = _ntp_unix - _boot_time
+    print(f"Time synced! NTP unix={_ntp_unix}, offset={mta_feed.EPOCH_OFFSET}")
+    del _ntp_buf, _ntp_secs, _ntp_unix, _boot_time
+except Exception as e:
+    print(f"NTP sync failed: {e}")
+    # Without accurate time, arrivals will be wrong but we'll try anyway
+
+# ---------------------------------------------------------------
+# HTTP session setup
+# ---------------------------------------------------------------
 ssl_context = ssl.create_default_context()
 requests = adafruit_requests.Session(pool, ssl_context)
+
+gc.collect()
 
 # ---------------------------------------------------------------
 # Main loop
@@ -138,6 +190,8 @@ arrivals = []
 scroll_maxes = [0, 0]   # scroll wrap distance per row (0 = static)
 scroll_offsets = [0, 0]  # current scroll position per row
 any_scrolling = False
+empty_count = 0          # consecutive fetches with 0 arrivals
+MAX_EMPTY = 3            # show "No trains" only after this many empty fetches
 
 SCROLL_SPEED = 1     # pixels per scroll tick
 SCROLL_INTERVAL = 0.08  # seconds between scroll frames
@@ -148,40 +202,104 @@ last_scroll = 0
 last_minutes = 0
 pause_counters = [0, 0]  # per-row pause counters
 
+
+def _arrivals_changed(old, new):
+    """Check if arrivals have meaningfully changed (different train or time)."""
+    if len(old) != len(new):
+        return True
+    for a, b in zip(old, new):
+        if a["route_id"] != b["route_id"]:
+            return True
+        if a["arrival_time"] != b["arrival_time"]:
+            return True
+    return False
+
+
+def _destinations_changed(old, new):
+    """Check if destination text changed (requires scroll reset)."""
+    if len(old) != len(new):
+        return True
+    for a, b in zip(old, new):
+        if a["destination"] != b["destination"]:
+            return True
+    return False
+
+
+fetch_due = True  # fetch immediately on boot
+
+def _scroll_at_pause():
+    """True if all scrolling rows are left-aligned and paused."""
+    for i in range(len(scroll_maxes)):
+        if scroll_maxes[i] > 0 and (scroll_offsets[i] != 0 or pause_counters[i] <= 0):
+            return False
+    return True
+
 while True:
     now = time.monotonic()
     wdt.feed()  # pet the watchdog every loop
 
     # --- Fetch new data ---
-    if now - last_fetch >= REFRESH_INTERVAL or last_fetch == 0:
+    if now - last_fetch >= REFRESH_INTERVAL:
+        fetch_due = True
+
+    # Only fetch when scroll is at rest (left-aligned pause) to avoid stutter
+    if fetch_due and (not any_scrolling or _scroll_at_pause()):
+        fetch_due = False
         last_fetch = now
         last_minutes = now
         gc.collect()
         print(f"Fetching arrivals... (free mem: {gc.mem_free()})")
 
         try:
-            arrivals = fetch_arrivals_multi(requests, ROW_CONFIGS, max_results=NUM_ROWS)
-            print(f"Got {len(arrivals)} arrivals:")
-            for a in arrivals:
-                print(f"  {a['route_id']} → {a['destination']} in {a['minutes']}min")
+            new_arrivals = fetch_arrivals_multi(requests, ROW_CONFIGS, NUM_ROWS)
+            print(f"Got {len(new_arrivals)} arrivals:")
+            for a in new_arrivals:
+                print(f"  {a['route_id']} -> {a['destination']} in {a['minutes']}min")
 
-            if arrivals:
-                # Compute scroll needs per row
-                scroll_maxes = [0, 0]
-                scroll_offsets = [0, 0]
-                pause_counters = [0, 0]
-                for i, a in enumerate(arrivals[:2]):
-                    scroll_maxes[i] = needs_scroll(a["destination"])
-                any_scrolling = any(s > 0 for s in scroll_maxes)
-                update_display_static(bitmap, palette, arrivals)
+            if new_arrivals:
+                empty_count = 0
+                if _arrivals_changed(arrivals, new_arrivals):
+                    dest_changed = _destinations_changed(arrivals, new_arrivals)
+                    arrivals = new_arrivals
+                    if dest_changed:
+                        # Destination text changed — reset scroll
+                        scroll_maxes = [0, 0]
+                        scroll_offsets = [0, 0]
+                        pause_counters = [0, 0]
+                        for i, a in enumerate(arrivals[:2]):
+                            scroll_maxes[i] = needs_scroll(a["destination"])
+                        any_scrolling = any(s > 0 for s in scroll_maxes)
+                        update_display_static(bitmap, palette, arrivals)
+                        if any_scrolling:
+                            pause_counters = [PAUSE_FRAMES, PAUSE_FRAMES]
+                            update_display_scroll(bitmap, arrivals, scroll_offsets, scroll_maxes)
+                    else:
+                        # Same destinations, just time changed — update time only
+                        arrivals = new_arrivals
+                        update_time_only(bitmap, arrivals)
+                else:
+                    print("  (no change, skipping redraw)")
             else:
-                any_scrolling = False
-                draw_error_screen(bitmap, palette, "No trains")
+                empty_count += 1
+                print(f"  (empty #{empty_count}/{MAX_EMPTY})")
+                if arrivals:
+                    # Keep showing old data, just update minutes
+                    current_time = _now_unix()
+                    for a in arrivals:
+                        a["minutes"] = max(0, int((a["arrival_time"] - current_time) / 60))
+                    # If all displayed trains are now past, clear them
+                    if all(a["minutes"] <= 0 and (a["arrival_time"] < current_time - 60) for a in arrivals):
+                        arrivals = []
+                        any_scrolling = False
+                        draw_error_screen(bitmap, palette, "No trains")
+                elif empty_count >= MAX_EMPTY:
+                    draw_error_screen(bitmap, palette, "No trains")
 
         except Exception as e:
             print(f"Fetch error: {e}")
-            any_scrolling = False
-            draw_error_screen(bitmap, palette, "Fetch err")
+            # Keep current display on fetch errors — don't wipe it
+            if not arrivals:
+                draw_error_screen(bitmap, palette, "Fetch err")
             try:
                 if not wifi.radio.connected:
                     wifi.radio.connect(
@@ -204,15 +322,15 @@ while True:
                     scroll_offsets[i] = (scroll_offsets[i] + SCROLL_SPEED) % scroll_maxes[i]
                     if scroll_offsets[i] == 0:
                         pause_counters[i] = PAUSE_FRAMES
+        # Always draw scroll frame — keeps text visible during pause
         update_display_scroll(bitmap, arrivals, scroll_offsets, scroll_maxes)
 
     # --- Update minutes between fetches ---
     elif arrivals and (now - last_minutes) >= MINUTES_INTERVAL:
         last_minutes = now
-        current_time = time.time()
+        current_time = _now_unix()
         for a in arrivals:
             a["minutes"] = max(0, int((a["arrival_time"] - current_time) / 60))
-        if not any_scrolling:
-            update_display_static(bitmap, palette, arrivals)
+        update_time_only(bitmap, arrivals)
 
     time.sleep(0.05 if any_scrolling else 1)

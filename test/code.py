@@ -20,7 +20,7 @@ displayio.release_displays()
 matrix = rgbmatrix.RGBMatrix(
     width=128,
     height=32,
-    bit_depth=5,
+    bit_depth=4,
     rgb_pins=[
         board.MTX_R1, board.MTX_B1, board.MTX_G1,
         board.MTX_R2, board.MTX_B2, board.MTX_G2,
@@ -48,9 +48,9 @@ bitmap = displayio.Bitmap(WIDTH, HEIGHT, 8)
 palette = displayio.Palette(8)
 
 palette[0] = 0x000000           # black
-palette[1] = 0x080808           # white (dimmed)
-palette[2] = 0x080008           # 7-train purple (dimmed)
-palette[3] = 0x000800           # G-train green (dimmed)
+palette[1] = 0x1E1E1E           # white (12%)
+palette[2] = 0x160614           # 7-train purple (12%)
+palette[3] = 0x081608           # G-train green (12%)
 
 tile_grid = displayio.TileGrid(bitmap, pixel_shader=palette)
 group = displayio.Group()
@@ -103,47 +103,27 @@ def measure_text(text):
         width += len(trimmed) + 1
     return width
 
-def draw_text_scroll(x, y, text, color, clip_left, clip_right, scroll_max=0):
-    """Draw scrolling text, writing every pixel in the clip region exactly once.
-    Pixels that aren't part of a glyph are set to black (0) in the same pass,
-    so there's no separate erase step and no flicker.
-    If scroll_max > 0, a second copy of the text is drawn offset by scroll_max
-    to create a seamless looping effect."""
-    # Build a set of lit pixels
-    lit = set()
-
-    # Draw text (and optionally a second wrapped copy)
-    copies = [x]
-    if scroll_max > 0:
-        copies.append(x + scroll_max)
-
-    for text_x in copies:
-        cursor_x = text_x
-        for ch in text:
-            glyph = FONT_5x7.get(ch, FONT_5x7.get(" "))
-            if glyph is None:
-                continue
-            trimmed = trim_glyph(glyph)
-            char_w = len(trimmed)
-            if cursor_x >= clip_right:
-                break
-            if cursor_x + char_w > clip_left:
-                for col, byte in enumerate(trimmed):
-                    px = cursor_x + col
-                    if clip_left <= px < clip_right:
-                        for row in range(7):
-                            if byte & (1 << row):
-                                lit.add((px, y + row))
-            cursor_x += char_w + 1
-
-    # Single pass: write every pixel in the region exactly once
-    for px in range(clip_left, clip_right):
-        for row in range(7):
-            py = y + row
-            if (px, py) in lit:
-                bitmap[px, py] = color
-            else:
-                bitmap[px, py] = 0
+def draw_text_clipped(x, y, text, color, clip_left, clip_right):
+    """Draw text clipped to a horizontal region [clip_left, clip_right)."""
+    cursor_x = x
+    for ch in text:
+        glyph = FONT_5x7.get(ch, FONT_5x7.get(" "))
+        if glyph is None:
+            continue
+        trimmed = trim_glyph(glyph)
+        char_w = len(trimmed)
+        # Skip if entirely off-screen right
+        if cursor_x >= clip_right:
+            break
+        # Draw only if at least partially visible
+        if cursor_x + char_w > clip_left:
+            for col, byte in enumerate(trimmed):
+                px = cursor_x + col
+                if clip_left <= px < clip_right:
+                    for row in range(7):
+                        if byte & (1 << row):
+                            set_pixel(px, y + row, color)
+        cursor_x += char_w + 1
 
 def draw_char_5x5(x, y, char, color):
     glyph = FONT_5x5.get(char.upper())
@@ -164,14 +144,7 @@ DIR_X = 25          # direction text start x
 DIR_GAP = 4         # minimum gap between direction and time text
 TIME_MARGIN = 2     # right margin for time text
 
-def clear_region(x, y, w, h):
-    """Clear a rectangular region to black."""
-    for dy in range(h):
-        for dx in range(w):
-            if 0 <= x + dx < WIDTH and 0 <= y + dy < HEIGHT:
-                bitmap[x + dx, y + dy] = 0
-
-def draw_row(y, line_color, line_char, row_index, direction, time_text, scroll_offset=0, scroll_max=0):
+def draw_row(y, line_color, line_char, row_index, direction, time_text, scroll_offset=0):
     row_h = 11
     cx = 15
     radius = 5
@@ -199,8 +172,8 @@ def draw_row(y, line_color, line_char, row_index, direction, time_text, scroll_o
         # Fits — draw static
         draw_text(DIR_X, text_baseline, direction, 1)
     else:
-        # Scroll — single-pass overwrite, seamless loop
-        draw_text_scroll(DIR_X - scroll_offset, text_baseline, direction, 1, DIR_X, clip_right, scroll_max)
+        # Scroll — draw at offset, clipped
+        draw_text_clipped(DIR_X - scroll_offset, text_baseline, direction, 1, DIR_X, clip_right)
 
 # ---------------------------------------------------------------
 # Demo data — row 1 is long (scrolls), row 2 fits (static)
@@ -220,34 +193,19 @@ row1_scroll_max = row1_dir_w + SCROLL_PAD if row1_needs_scroll else 0
 print(f"Dir width: {row1_dir_w}, clip: {row1_clip}, scroll: {row1_needs_scroll}")
 print("Display is running.")
 
-# Draw static elements once
-draw_row(*ROW1, scroll_offset=0)
-draw_row(*ROW2, scroll_offset=0)
-
-# Pre-calculate the scroll clip region for row 1
-row1_row_h = 11
-row1_cy = ROW1[0] + row1_row_h // 2 + 1 if ROW1[0] == 0 else ROW1[0] + row1_row_h // 2 - 1
-row1_baseline = row1_cy - 2
-row1_time_w = measure_text(ROW1[5])
-row1_time_x = WIDTH - row1_time_w - TIME_MARGIN
-row1_clip_right = row1_time_x - DIR_GAP
-
 scroll_offset = 0
 SCROLL_SPEED = 1  # pixels per frame
-FRAME_DELAY = 0.08  # seconds between frames (slower scroll)
-PAUSE_FRAMES = 50   # pause this many frames when text is left-aligned
-pause_counter = 0
+FRAME_DELAY = 0.05  # seconds between frames
 
 while True:
+    # Clear
+    for yy in range(HEIGHT):
+        for xx in range(WIDTH):
+            bitmap[xx, yy] = 0
+    # Draw rows
+    draw_row(*ROW1, scroll_offset=scroll_offset if row1_needs_scroll else 0)
+    draw_row(*ROW2, scroll_offset=0)
+    # Advance scroll
     if row1_needs_scroll:
-        if pause_counter > 0:
-            # Pausing — don't scroll
-            pause_counter -= 1
-        else:
-            # Single-pass overwrite with seamless wrap
-            draw_text_scroll(DIR_X - scroll_offset, row1_baseline, ROW1[4], 1, DIR_X, row1_clip_right, row1_scroll_max)
-            scroll_offset = (scroll_offset + SCROLL_SPEED) % row1_scroll_max
-            # Pause when text is perfectly left-aligned (offset = 0)
-            if scroll_offset == 0:
-                pause_counter = PAUSE_FRAMES
+        scroll_offset = (scroll_offset + SCROLL_SPEED) % row1_scroll_max
     time.sleep(FRAME_DELAY)
