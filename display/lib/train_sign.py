@@ -229,7 +229,9 @@ def _draw_row_static(bitmap, y, line_color_index, line_char, row_index_text, dir
     _draw_circle(bitmap, CIRCLE_X, circle_cy, line_color_index)
 
     # Draw line character centered inside circle (5x5, black on colored circle)
-    _draw_char_5x5(bitmap, CIRCLE_X - 2, circle_cy - 2, line_char, COLOR_BLACK)
+    # Shuttle routes (GS, FS, H) display as "S"
+    display_char = "S" if line_char in ("GS", "FS", "H") else line_char
+    _draw_char_5x5(bitmap, CIRCLE_X - 2, circle_cy - 2, display_char, COLOR_BLACK)
 
     # All text aligned to circle center
     text_baseline = circle_cy - 2

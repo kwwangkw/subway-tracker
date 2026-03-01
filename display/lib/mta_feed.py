@@ -53,6 +53,11 @@ for group, url in FEED_URLS.items():
     for ch in group:
         LINE_TO_FEED[ch] = group
 
+# Multi-char route IDs for shuttles
+LINE_TO_FEED["GS"] = "1234567S"   # 42nd St Shuttle — in the main feed
+LINE_TO_FEED["FS"] = "BDFM"       # Franklin Ave Shuttle — in the BDFM feed
+LINE_TO_FEED["H"] = "ACEH"        # Rockaway Park Shuttle — in the ACE feed
+
 
 # ---------------------------------------------------------------
 # Minimal GTFS-RT (protobuf) parser
@@ -346,6 +351,19 @@ DESTINATION_NAMES = {
     "6": {
         "N": "Pelham Bay Park",
         "S": "Brooklyn Bridge",
+    },
+    # Shuttles
+    "GS": {
+        "N": "Grand Central",
+        "S": "Times Sq",
+    },
+    "FS": {
+        "N": "Franklin Av",
+        "S": "Prospect Park",
+    },
+    "H": {
+        "N": "Broad Channel",
+        "S": "Rockaway Park",
     },
 }
 
