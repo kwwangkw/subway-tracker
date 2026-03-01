@@ -59,6 +59,29 @@ _fetch_due = True
 _initialized = False
 
 
+def update_stops(new_configs):
+    """Update stop configs at runtime and force a re-fetch."""
+    global _fetch_due, _last_fetch, _arrivals, _scroll_maxes, _scroll_offsets
+    global _any_scrolling, _pause_counters
+
+    ROW_CONFIGS[:] = new_configs
+    _arrivals = []
+    _scroll_maxes[:] = [0, 0]
+    _scroll_offsets[:] = [0, 0]
+    _any_scrolling = False
+    _pause_counters[:] = [0, 0]
+    _last_fetch = 0
+    _fetch_due = True
+    print(f"Train stops updated: {ROW_CONFIGS}")
+
+    # Clear display and show loading while re-fetching
+    if _bitmap is not None and _palette is not None:
+        for y in range(32):
+            for x in range(128):
+                _bitmap[x, y] = 0
+        draw_loading_screen(_bitmap, _palette)
+
+
 def _arrivals_changed(old, new):
     if len(old) != len(new):
         return True

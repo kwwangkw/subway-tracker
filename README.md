@@ -2,7 +2,7 @@
 
 Real-time NYC subway arrival display powered by an **Adafruit MatrixPortal S3** and two chained **64×32 HUB75 LED matrices** (128×32 total).
 
-![Subway Tracker Display](imgs/subwaytracker.png)
+![Subway Tracker Display](/imgs/subwaytracker.png)
 
 ## Hardware
 
@@ -188,7 +188,7 @@ Each banner displays a centered holiday greeting with animated elements around t
 |:---:|:---:|:---:|
 | ![Beach Day](imgs/beachday.png) | ![Christmas](imgs/christmas.png) | ![Halloween](imgs/halloween.png) |
 | Beach Day | Christmas | Halloween |
-| ![4th of July](imgs/4thofjuly.png) | ![New Year](imgs/newyear.png) | ![St. Patrick's Day](imgs/stpaddys.png) |
+| ![4th of July](imgs/4thofjuly.png) | ![New Year](imgs/newyear.png) | ![St. Patrick's Day](/imgs/stpaddys.png) |
 | 4th of July | New Year | St. Patrick's Day |
 | ![Thanksgiving](imgs/thanksgiving.png) | ![Valentine's Day](imgs/valentines.png) | ![Subway Tracker](imgs/subwaytracker.png) |
 | Thanksgiving | Valentine's Day | Train Sign |

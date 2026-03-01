@@ -7,6 +7,7 @@
 import socketpool
 import mdns
 import wifi
+import os
 import gc
 
 _server_socket = None
@@ -26,11 +27,19 @@ MODES = [
     ("beachday", "🏖️ Beach Day"),
 ]
 
+# Current stop configs — initialized from settings.toml, changeable via web
+_stops_config = []  # list of strings like ["721:7:N", "G24:G:S"]
+_pending_stops = None  # set by poll(), consumed by code.py
+
 
 def start(pool, port=80):
     """Start the HTTP server on the given port. Returns True if successful."""
-    global _server_socket, _pool, _mdns_server
+    global _server_socket, _pool, _mdns_server, _stops_config
     _pool = pool
+
+    # Initialize stops from settings.toml
+    stops_str = os.getenv("MTA_STOPS", "")
+    _stops_config[:] = [s.strip() for s in stops_str.split(",") if s.strip()]
 
     # Set up mDNS so http://display.local works
     try:
@@ -56,7 +65,13 @@ def start(pool, port=80):
 
 
 def poll(current_mode):
-    """Non-blocking check for HTTP requests. Returns new mode name or None."""
+    """Non-blocking check for HTTP requests.
+
+    Returns dict with optional keys:
+        "mode" — new mode name to switch to
+        "stops" — new list of stop config strings
+    Returns None if no actionable request.
+    """
     if _server_socket is None:
         return None
 
@@ -66,31 +81,52 @@ def poll(current_mode):
         # No connection waiting — normal, return immediately
         return None
 
-    new_mode = None
+    result = None
     try:
         client.settimeout(2)
-        buf = bytearray(512)
+        buf = bytearray(1024)
         size = client.recv_into(buf)
         if size:
-            line = buf[:size].decode("utf-8").split("\r\n")[0]
+            request = buf[:size].decode("utf-8")
+            line = request.split("\r\n")[0]
             parts = line.split(" ")
+            method = parts[0] if parts else "GET"
             path = parts[1] if len(parts) >= 2 else "/"
 
             if path.startswith("/mode/"):
                 requested = path[6:].strip("/").lower()
                 valid_modes = [m[0] for m in MODES]
                 if requested in valid_modes:
-                    new_mode = requested
+                    result = {"mode": requested}
                     _send_response(client, 303, "See Other",
                                    headers="Location: /\r\n")
                 else:
                     _send_response(client, 404, "Not Found",
                                    body="Unknown mode")
+            elif path == "/stops" and method == "POST":
+                # Get the body — may need a second recv if headers were long
+                body = ""
+                if "\r\n\r\n" in request:
+                    body = request.split("\r\n\r\n", 1)[1]
+                if not body:
+                    try:
+                        buf2 = bytearray(256)
+                        s2 = client.recv_into(buf2)
+                        if s2:
+                            body = buf2[:s2].decode("utf-8")
+                    except Exception:
+                        pass
+                new_stops = _parse_stops_form(body)
+                if new_stops:
+                    _stops_config[:] = new_stops
+                    result = {"stops": list(new_stops)}
+                    print(f"Stops updated: {new_stops}")
+                _send_response(client, 303, "See Other",
+                               headers="Location: /\r\n")
             else:
                 _send_page(client, current_mode)
     except Exception as e:
         print(f"HTTP error: {e}")
-        # Send the error in the response so we can see it via curl
         try:
             err = str(e)
             client.send(f"HTTP/1.1 500 Error\r\nContent-Length: {len(err)}\r\nConnection: close\r\n\r\n{err}".encode("utf-8"))
@@ -102,7 +138,45 @@ def poll(current_mode):
         except Exception:
             pass
 
-    return new_mode
+    return result
+
+
+def _parse_stops_form(body):
+    """Parse URL-encoded form body for the stops field.
+
+    Returns list of non-empty stop config strings, or None if invalid.
+    """
+    # Extract the stops= value from the form body
+    raw = ""
+    for pair in body.split("&"):
+        if pair.startswith("stops="):
+            raw = pair[6:]
+            break
+
+    # URL-decode: + → space, %XX → char
+    raw = raw.replace("+", " ")
+    i = 0
+    decoded = []
+    while i < len(raw):
+        if raw[i] == "%" and i + 2 < len(raw):
+            try:
+                decoded.append(chr(int(raw[i+1:i+3], 16)))
+                i += 3
+                continue
+            except ValueError:
+                pass
+        decoded.append(raw[i])
+        i += 1
+    raw = "".join(decoded).strip().upper()
+
+    # Split on commas, validate each entry has at least a stop ID
+    new_stops = []
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if entry and entry.split(":")[0]:
+            new_stops.append(entry)
+
+    return new_stops if new_stops else None
 
 
 def _send_response(client, code, reason, body="", headers="",
@@ -158,6 +232,19 @@ _CSS = (
     "color:#fff;text-decoration:none;border-radius:10px;font-size:1.1em;"
     "text-align:center;border:1px solid #333}"
     ".b.a{background:#1a3a1a;border-color:#2d5a2d;color:#6f6}"
+    "h2{margin:24px 0 12px;font-size:1em;color:#aaa;border-top:1px solid #333;"
+    "padding-top:16px}"
+    ".row{margin:8px 0}"
+    ".row label{display:block;color:#888;font-size:.8em;margin-bottom:4px}"
+    ".row input{width:100%;padding:10px 12px;background:#222;color:#fff;"
+    "border:1px solid #333;border-radius:8px;font-size:1em;"
+    "font-family:monospace}"
+    ".row input:focus{border-color:#555;outline:none}"
+    ".hint{color:#555;font-size:.75em;margin-top:4px}"
+    ".sb{display:block;width:100%;padding:14px;margin:12px 0;background:#1a2a4a;"
+    "color:#8af;border:1px solid #2a4a7a;border-radius:10px;font-size:1em;"
+    "cursor:pointer}"
+    ".sb:active{background:#2a3a5a}"
     "</style>"
 )
 
@@ -190,6 +277,21 @@ def _send_page(client, current_mode):
     parts.append('<div class="s">')
     parts.append(ip)
     parts.append("</div>")
+
+    # --- Station config form ---
+    parts.append("<h2>Stations</h2>")
+    parts.append('<form method="POST" action="/stops">')
+    stops_val = ",".join(_stops_config)
+    parts.append('<div class="row"><label>Stops</label>')
+    parts.append('<input name="stops" value="')
+    parts.append(stops_val)
+    parts.append('" placeholder="721:7:N,G24:G:S"></div>')
+    parts.append('<div class="hint">STOP:LINE:DIR comma-separated — nearest 2 arrivals shown</div>')
+    parts.append('<button type="submit" class="sb">Update Stations</button>')
+    parts.append("</form>")
+
+    # --- Mode buttons ---
+    parts.append("<h2>Mode</h2>")
 
     for mode_id, _emoji_label in MODES:
         lbl = _LABELS.get(mode_id, mode_id)

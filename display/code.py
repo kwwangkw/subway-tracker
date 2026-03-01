@@ -249,21 +249,29 @@ current_module = _activate_mode(current_mode_name)
 while True:
     wdt.feed()
 
-    # Check for mode switch via HTTP
-    new_mode = web_server.poll(current_mode_name)
-    if new_mode is not None and new_mode != current_mode_name:
-        print(f"Mode switch: {current_mode_name} -> {new_mode}")
+    # Check for mode switch or stop change via HTTP
+    action = web_server.poll(current_mode_name)
+    if action is not None:
+        # Handle stop config change
+        if "stops" in action:
+            if current_mode_name == "train" and current_module is not None:
+                current_module.update_stops(action["stops"])
 
-        # Unload old module from sys.modules to free RAM
-        import sys
-        old_key = f"modes.{current_mode_name}"
-        if old_key in sys.modules:
-            del sys.modules[old_key]
-        gc.collect()
+        # Handle mode switch
+        new_mode = action.get("mode")
+        if new_mode is not None and new_mode != current_mode_name:
+            print(f"Mode switch: {current_mode_name} -> {new_mode}")
 
-        current_mode_name = new_mode
-        _save_mode(current_mode_name)
-        current_module = _activate_mode(current_mode_name)
+            # Unload old module from sys.modules to free RAM
+            import sys
+            old_key = f"modes.{current_mode_name}"
+            if old_key in sys.modules:
+                del sys.modules[old_key]
+            gc.collect()
+
+            current_mode_name = new_mode
+            _save_mode(current_mode_name)
+            current_module = _activate_mode(current_mode_name)
 
     # Run one animation step
     if current_module is not None:
