@@ -252,18 +252,24 @@ def _draw_row_static(bitmap, y, line_color_index, line_char, row_index_text, dir
         _draw_text(bitmap, TEXT_X, text_baseline, direction, COLOR_WHITE)
 
 
+# Worst-case time width — used for stable scroll clip boundary
+_WORST_TIME_W = None
+
+def _worst_time_w():
+    global _WORST_TIME_W
+    if _WORST_TIME_W is None:
+        _WORST_TIME_W = _measure_text("99MIN")
+    return _WORST_TIME_W
+
+
 def _draw_row_scroll(bitmap, y, direction, scroll_offset, scroll_max, time_text):
     """
     Redraw ONLY the scrolling direction text region for a row.
     Uses single-pass pixel writing for flicker-free updates.
 
-    Args:
-        bitmap: displayio.Bitmap to draw on
-        y: top y-coordinate of the row
-        direction: destination text
-        scroll_offset: current horizontal scroll offset
-        scroll_max: total scroll distance for seamless wrap
-        time_text: arrival time text (needed to compute clip region)
+    Uses worst-case time width so the clip region stays constant
+    regardless of current minutes (prevents frozen trailing pixels
+    when time text changes width).
     """
     if y == 0:
         circle_cy = y + ROW_H // 2 + 1
@@ -271,9 +277,8 @@ def _draw_row_scroll(bitmap, y, direction, scroll_offset, scroll_max, time_text)
         circle_cy = y + ROW_H // 2 - 1
     text_baseline = circle_cy - 2
 
-    time_width = _measure_text(time_text)
-    time_x = WIDTH - time_width - TIME_MARGIN
-    clip_right = time_x - DIR_GAP
+    # Use worst-case time width for a stable clip boundary
+    clip_right = WIDTH - _worst_time_w() - TIME_MARGIN - DIR_GAP
 
     _draw_text_scroll(bitmap, TEXT_X - scroll_offset, text_baseline, direction, COLOR_WHITE, TEXT_X, clip_right, scroll_max)
 
@@ -415,9 +420,10 @@ def update_time_only(bitmap, arrivals):
         time_width = _measure_text(time_text)
         time_x = WIDTH - time_width - TIME_MARGIN
 
-        # Clear the time region (from time_x-gap to right edge, 7px tall)
-        # Use a generous left bound to erase any previous wider time text
-        clear_left = WIDTH - _measure_text("99MIN") - TIME_MARGIN - 2
+        # Clear from the worst-case direction clip edge to the right edge.
+        # This erases both the old time text AND any frozen destination
+        # pixels in the gap when time width changes (e.g. 9MIN -> 10MIN).
+        clear_left = WIDTH - _worst_time_w() - TIME_MARGIN - DIR_GAP
         for px in range(clear_left, WIDTH):
             for row in range(7):
                 py = text_baseline + row

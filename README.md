@@ -2,7 +2,7 @@
 
 Real-time NYC subway arrival display powered by an **Adafruit MatrixPortal S3** and two chained **64×32 HUB75 LED matrices** (128×32 total).
 
-![Display mockup](TrainSign.ipynb)
+![Subway Tracker Display](imgs/subwaytracker.png)
 
 ## Hardware
 
@@ -167,22 +167,50 @@ Each row shows:
 - **Destination** name
 - **Arrival time** in minutes (right-aligned)
 
-## Holiday Banners
+## Holiday Modes
 
-The `Holidays/` folder contains animated holiday banners for the same hardware. To use one, copy its `code.py` to the root of your `CIRCUITPY` drive (replacing the train sign `code.py`). No Wi-Fi required — these run entirely offline.
+The display includes 8 animated holiday modes, all built in and switchable instantly via the [web interface](#mode-switching-via-web-interface). No file swapping or reboot needed — just tap a button. Holiday animations run entirely offline (no Wi-Fi needed after the initial connection).
 
-| Holiday | Folder | Animation |
-|---------|--------|-----------|
-| 🏖️ Beach Day | `Holidays/BeachDay/` | Scrolling ocean waves, sun, sand, and colorful beach umbrellas |
-| 🎄 Christmas | `Holidays/Christmas/` | Falling snowflakes and Christmas trees with blinking lights |
-| 🎃 Halloween | `Holidays/Halloween/` | Bobbing spiders on web threads and animated bats |
-| 🇺🇸 4th of July | `Holidays/July4th/` | Red, white, and blue fireworks |
-| 🎆 New Year | `Holidays/NewYear/` | Multi-color fireworks with 3-color particle trails |
-| ☘️ St. Patrick's Day | `Holidays/StPatricks/` | Floating shamrocks in multiple shades of green |
-| 🍂 Thanksgiving | `Holidays/Thanksgiving/` | Falling autumn leaves (maple, oak, aspen, and more) in fall colors |
-| 💕 Valentine's Day | `Holidays/Valentines/` | Hearts floating upward in pinks and reds |
+| Holiday | Mode File | Animation |
+|---------|-----------|-----------|
+| 🏖️ Beach Day | `modes/beachday.py` | Scrolling ocean waves, sun, sand, and colorful beach umbrellas |
+| 🎄 Christmas | `modes/christmas.py` | Falling snowflakes and Christmas trees with blinking lights |
+| 🎃 Halloween | `modes/halloween.py` | Bobbing spiders on web threads and animated bats |
+| 🇺🇸 4th of July | `modes/july4th.py` | Red, white, and blue fireworks |
+| 🎆 New Year | `modes/newyear.py` | Multi-color fireworks with 3-color particle trails |
+| ☘️ St. Patrick's Day | `modes/stpatricks.py` | Floating shamrocks in multiple shades of green |
+| 🍂 Thanksgiving | `modes/thanksgiving.py` | Falling autumn leaves (maple, oak, aspen, and more) in fall colors |
+| 💕 Valentine's Day | `modes/valentines.py` | Hearts floating upward in pinks and reds |
 
 Each banner displays a centered holiday greeting with animated elements around the text.
+
+| | | |
+|:---:|:---:|:---:|
+| ![Beach Day](imgs/beachday.png) | ![Christmas](imgs/christmas.png) | ![Halloween](imgs/halloween.png) |
+| Beach Day | Christmas | Halloween |
+| ![4th of July](imgs/4thofjuly.png) | ![New Year](imgs/newyear.png) | ![St. Patrick's Day](imgs/stpaddys.png) |
+| 4th of July | New Year | St. Patrick's Day |
+| ![Thanksgiving](imgs/thanksgiving.png) | ![Valentine's Day](imgs/valentines.png) | ![Subway Tracker](imgs/subwaytracker.png) |
+| Thanksgiving | Valentine's Day | Train Sign |
+
+### Mode Switching via Web Interface
+
+Once connected to Wi-Fi, the display runs a built-in web server for switching modes on the fly:
+
+- **http://display.local** (via mDNS)
+- **http://\<board-ip\>** (e.g. `http://192.168.4.63`)
+
+![Web Mode Picker](imgs/websitemodepicker.png)
+
+Tap any button to instantly switch between the live train sign and holiday animations — no reboot needed.
+
+> **Tip:** If `display.local` doesn't resolve, use the board's IP address (printed to the serial console on boot).
+
+### Loading Screen
+
+![Loading Screen](imgs/loadingscreen.png)
+
+Shown briefly on boot while connecting to Wi-Fi and fetching the first batch of arrivals.
 
 ## Development
 
