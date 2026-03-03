@@ -30,6 +30,10 @@ _temp_high = None      # today's high
 _temp_low = None       # today's low
 _weather_code = None   # WMO weather code
 _needs_redraw = True
+_last_minute = -1  # track displayed minute for time updates
+_time_only_update = False  # True when only the clock changed, not weather data
+_prev_bottom_str = None  # previously drawn bottom text for incremental clear
+_prev_bottom_x = 0
 _lat = None
 _lon = None
 _location = ""
@@ -176,6 +180,14 @@ def _get_icon(code, is_day=True):
     if code <= 86:
         return _SNOW   # snow showers
     return _THUNDER
+
+
+def _clear_rect(x, y, w, h):
+    """Clear a rectangular region to black."""
+    for py in range(y, y + h):
+        for px in range(x, x + w):
+            if 0 <= px < WIDTH and 0 <= py < HEIGHT:
+                _bitmap[px, py] = 0
 
 
 def _set_pixel(x, y, c):
@@ -331,6 +343,7 @@ def setup(bitmap, palette, pool=None, **kwargs):
     global _bitmap, _palette, _requests, _last_fetch
     global _temperature, _temp_high, _temp_low, _weather_code
     global _lat, _lon, _location, _fetch_error, _needs_redraw
+    global _last_minute, _time_only_update, _prev_bottom_str, _prev_bottom_x
 
     _bitmap = bitmap
     _palette = palette
@@ -344,6 +357,10 @@ def setup(bitmap, palette, pool=None, **kwargs):
     _location = ""
     _fetch_error = False
     _needs_redraw = True
+    _last_minute = -1
+    _time_only_update = False
+    _prev_bottom_str = None
+    _prev_bottom_x = 0
 
     # Set up colors
     palette[COLOR_BLACK] = 0x000000
@@ -383,9 +400,48 @@ def setup(bitmap, palette, pool=None, **kwargs):
     print(f"Weather mode: ZIP={ZIP_CODE}")
 
 
+def _build_bottom_text():
+    """Build the bottom bar string (time - condition)."""
+    condition = WMO_CODES.get(_weather_code, "Unknown")
+    now_unix = time.time() + EPOCH_OFFSET
+    tz = _tz_offset if _tz_offset is not None else int(os.getenv("CLOCK_TZ_OFFSET", "-5"))
+    ts = now_unix + tz * 3600
+    remaining = ts % 86400
+    if remaining < 0:
+        remaining += 86400
+    hh = int(remaining // 3600)
+    mm = int((remaining % 3600) // 60)
+    ampm = "AM" if hh < 12 else "PM"
+    h12 = hh % 12
+    if h12 == 0:
+        h12 = 12
+    time_str = f"{h12}:{mm:02d}{ampm}"
+    bottom_str = f"{time_str} - {condition.upper()}"
+    bottom_w = _measure_text(bottom_str)
+    if bottom_w > WIDTH:
+        bottom_str = condition.upper()
+        bottom_w = _measure_text(bottom_str)
+    return bottom_str, bottom_w
+
+
+def _draw_bottom_text():
+    """Draw the bottom time/condition bar, clearing old text first."""
+    global _prev_bottom_str, _prev_bottom_x
+    bottom_str, bottom_w = _build_bottom_text()
+    bottom_y = 24
+    bottom_x = (WIDTH - bottom_w) // 2
+    # Clear previous bottom text area
+    if _prev_bottom_str is not None:
+        prev_w = _measure_text(_prev_bottom_str)
+        _clear_rect(_prev_bottom_x, bottom_y, prev_w, 7)
+    _draw_small_text(bottom_x, bottom_y, bottom_str, 5)
+    _prev_bottom_str = bottom_str
+    _prev_bottom_x = bottom_x
+
+
 def animate(bitmap):
     """Update weather display. Returns sleep time."""
-    global _last_fetch, _needs_redraw
+    global _last_fetch, _needs_redraw, _last_minute, _time_only_update
 
     now = time.monotonic()
 
@@ -394,12 +450,34 @@ def animate(bitmap):
         _last_fetch = now
         _fetch_weather(_requests)
         _needs_redraw = True
+        _time_only_update = False
 
-    # Only redraw when data changed
+    # Check if the minute changed - only bottom text needs updating
+    now_unix = time.time() + EPOCH_OFFSET
+    tz = _tz_offset if _tz_offset is not None else int(os.getenv("CLOCK_TZ_OFFSET", "-5"))
+    remaining = (now_unix + tz * 3600) % 86400
+    if remaining < 0:
+        remaining += 86400
+    cur_minute = int((remaining % 3600) // 60)
+    if cur_minute != _last_minute:
+        _last_minute = cur_minute
+        if not _needs_redraw:
+            _time_only_update = True
+            _needs_redraw = True
+
+    # Nothing to update
     if not _needs_redraw:
-        return 2.0
+        return 0.5
     _needs_redraw = False
 
+    # If only the time changed, just redraw the bottom bar
+    if _time_only_update and _temperature is not None:
+        _time_only_update = False
+        _draw_bottom_text()
+        return 0.5
+    _time_only_update = False
+
+    # --- Full redraw ---
     # Clear
     for y in range(HEIGHT):
         for x in range(WIDTH):
@@ -447,30 +525,6 @@ def animate(bitmap):
         _draw_small_text(right_x, 12, lo_str, 7)
 
     # --- Bottom: time - conditions text ---
-    condition = WMO_CODES.get(_weather_code, "Unknown")
+    _draw_bottom_text()
 
-    # Build 12-hour time string
-    now_unix = time.time() + EPOCH_OFFSET
-    tz = _tz_offset if _tz_offset is not None else int(os.getenv("CLOCK_TZ_OFFSET", "-5"))
-    local = now_unix + tz * 3600
-    hh = int(local // 3600) % 24
-    mm = int(local // 60) % 60
-    ampm = "AM" if hh < 12 else "PM"
-    h12 = hh % 12
-    if h12 == 0:
-        h12 = 12
-    time_str = f"{h12}:{mm:02d}{ampm}"
-
-    bottom_str = f"{time_str} - {condition.upper()}"
-    bottom_w = _measure_text(bottom_str)
-
-    # Fall back to just condition if too wide
-    if bottom_w > WIDTH:
-        bottom_str = condition.upper()
-        bottom_w = _measure_text(bottom_str)
-
-    bottom_y = 24
-    bottom_x = (WIDTH - bottom_w) // 2
-    _draw_small_text(bottom_x, bottom_y, bottom_str, 5)
-
-    return 2.0
+    return 0.5

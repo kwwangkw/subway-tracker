@@ -111,27 +111,34 @@ except Exception as e:
 # ---------------------------------------------------------------
 pool = socketpool.SocketPool(wifi.radio)
 
+NTP_RESYNC_INTERVAL = 6 * 3600  # re-sync every 6 hours
+_last_ntp_sync = 0
+
+def _ntp_sync():
+    """Sync time via NTP. Updates EPOCH_OFFSET."""
+    global _last_ntp_sync
+    try:
+        buf = bytearray(48)
+        buf[0] = 0x1B
+        sock = pool.socket(pool.AF_INET, pool.SOCK_DGRAM)
+        sock.settimeout(5)
+        sock.sendto(buf, ("pool.ntp.org", 123))
+        sock.recvfrom_into(buf)
+        sock.close()
+        ntp_secs = (
+            buf[40] << 24 | buf[41] << 16 |
+            buf[42] << 8  | buf[43]
+        )
+        ntp_unix = ntp_secs - 2208988800
+        mta_feed.EPOCH_OFFSET = ntp_unix - time.time()
+        _last_ntp_sync = time.monotonic()
+        print(f"Time synced! offset={mta_feed.EPOCH_OFFSET}")
+    except Exception as e:
+        print(f"NTP sync failed: {e}")
+
 print("Syncing time via NTP...")
 wdt.feed()
-try:
-    _ntp_buf = bytearray(48)
-    _ntp_buf[0] = 0x1B
-    _ntp_sock = pool.socket(pool.AF_INET, pool.SOCK_DGRAM)
-    _ntp_sock.settimeout(5)
-    _ntp_sock.sendto(_ntp_buf, ("pool.ntp.org", 123))
-    _ntp_sock.recvfrom_into(_ntp_buf)
-    _ntp_sock.close()
-    _ntp_secs = (
-        _ntp_buf[40] << 24 | _ntp_buf[41] << 16 |
-        _ntp_buf[42] << 8  | _ntp_buf[43]
-    )
-    _ntp_unix = _ntp_secs - 2208988800
-    _boot_time = time.time()
-    mta_feed.EPOCH_OFFSET = _ntp_unix - _boot_time
-    print(f"Time synced! offset={mta_feed.EPOCH_OFFSET}")
-    del _ntp_buf, _ntp_secs, _ntp_unix, _boot_time
-except Exception as e:
-    print(f"NTP sync failed: {e}")
+_ntp_sync()
 
 gc.collect()
 
@@ -331,6 +338,10 @@ _last_holiday_check_day = -1
 # ---------------------------------------------------------------
 while True:
     wdt.feed()
+
+    # Periodic NTP re-sync to prevent clock drift
+    if time.monotonic() - _last_ntp_sync >= NTP_RESYNC_INTERVAL:
+        _ntp_sync()
 
     # Daily check - if we're still on a holiday mode after the holiday, revert
     try:
