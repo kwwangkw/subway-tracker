@@ -72,6 +72,12 @@ MTA_REFRESH_INTERVAL = "30"
 
 # Number of rows to display (max 2 for 128x32)
 MTA_NUM_ROWS = "2"
+
+# Zip code for weather location & clock timezone
+WEATHER_ZIP = "10001"
+
+# Stock ticker symbols (comma-separated)
+STOCK_SYMBOLS = "AAPL,GOOGL,MSFT"
 ```
 
 The `MTA_STOPS` format is `stop_id:line:direction` where:
@@ -174,7 +180,8 @@ The display includes a clock, weather display, and 8 animated holiday modes — 
 | Mode | Mode File | Description |
 |------|-----------|-------------|
 | 🕐 Clock | `modes/clock.py` | Large digital clock with date — timezone auto-detected from zip code |
-| 🌤️ Weather | `modes/weather.py` | Current temperature, high/low, conditions icon, and location via Open-Meteo API |
+| 🌤️ Weather | `modes/weather.py` | Current temperature, high/low, conditions icon, and time via Open-Meteo API |
+| 📈 Stocks | `modes/stocks.py` | Live stock ticker cycling through configured symbols — price, change, and percent via Yahoo Finance (free, no API key) |
 | 🏖️ Beach Day | `modes/beachday.py` | Scrolling ocean waves, sun, sand, and colorful beach umbrellas |
 | 🎄 Christmas | `modes/christmas.py` | Falling snowflakes and Christmas trees with blinking lights |
 | 🎃 Halloween | `modes/halloween.py` | Bobbing spiders on web threads and animated bats |
@@ -194,19 +201,39 @@ Each banner displays a centered holiday greeting with animated elements around t
 | Beach Day | Christmas | Halloween |
 | ![4th of July](imgs/4thofjuly.png) | ![New Year](imgs/newyear.png) | ![St. Patrick's Day](/imgs/stpaddys.png) |
 | 4th of July | New Year | St. Patrick's Day |
-| ![Thanksgiving](imgs/thanksgiving.png) | ![Valentine's Day](imgs/valentines.png) | |
-| Thanksgiving | Valentine's Day | |
+| ![Thanksgiving](imgs/thanksgiving.png) | ![Valentine's Day](imgs/valentines.png) | ![Stocks](imgs/stocks.png) |
+| Thanksgiving | Valentine's Day | Stocks |
+
+### Holiday Auto-Switch
+
+The display automatically switches to the matching holiday mode on these days:
+
+| Date | Mode |
+|------|------|
+| January 1 | 🎆 New Year |
+| February 14 | 💕 Valentine's Day |
+| March 17 | ☘️ St. Patrick's Day |
+| July 4 | 🇺🇸 4th of July |
+| 4th Thursday of November | 🍂 Thanksgiving |
+| October 31 | 🎃 Halloween |
+| December 25 | 🎄 Christmas |
+
+This works both on boot and at midnight if the display is already running. If you manually switch modes via the web UI, the auto-switch is skipped for the rest of the day — but resets the next midnight so the next holiday can still trigger.
 
 ### Mode Switching via Web Interface
 
-Once connected to Wi-Fi, the display runs a built-in web server for switching modes on the fly:
+Once connected to Wi-Fi, the display runs a built-in web server for switching modes and configuring settings:
 
 - **http://display.local** (via mDNS)
 - **http://\<board-ip\>** (e.g. `http://192.168.4.63`)
 
 ![Web Mode Picker](imgs/websitemodepicker.png)
 
-Tap any button to instantly switch between the live train sign and holiday animations — no reboot needed.
+Tap any mode button to instantly switch. The **Settings** section (collapsible) lets you configure:
+
+- **Train Stops** — station/line/direction for the train sign
+- **Zip Code** — sets weather location and auto-detects timezone for the clock
+- **Stock Symbols** — comma-separated tickers for stock mode (e.g. `AAPL,GOOGL,MSFT`)
 
 > **Tip:** If `display.local` doesn't resolve, use the board's IP address (printed to the serial console on boot).
 
