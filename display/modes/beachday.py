@@ -1,4 +1,4 @@
-# modes/beachday.py — Beach Day banner mode (from Holidays/BeachDay/code.py)
+# modes/beachday.py - Beach Day banner mode (from Holidays/BeachDay/code.py)
 import math
 
 WIDTH = 128
@@ -14,7 +14,7 @@ def fill_rect(x, y, w, h, c):
         for dx in range(w):
             set_pixel(x + dx, y + dy, c)
 
-# Text — exact glyphs from original
+# Text - exact glyphs from original
 ALPHA = {
     'H': ["X...X","X...X","X...X","XXXXX","X...X","X...X","X...X"],
     'A': [".XXX.","X...X","X...X","XXXXX","X...X","X...X","X...X"],
@@ -64,7 +64,7 @@ SAND_TOP = 28
 WAVE_TOP = 25
 WAVE_ROWS = 3
 
-# Sun — from original (filled circle + rays)
+# Sun - from original (filled circle + rays)
 SUN_CX = 112
 SUN_CY = 7
 SUN_R = 4
@@ -82,7 +82,7 @@ def draw_sun():
         for dist in range(SUN_R + 1, SUN_R + 3):
             set_pixel(SUN_CX + rdx * dist, SUN_CY + rdy * dist, 2)
 
-# Umbrellas — from original (semicircle dome canopy)
+# Umbrellas - from original (semicircle dome canopy)
 UMBRELLAS = [
     (20, 4, 5),    # red/white
     (64, 8, 5),    # blue/white
@@ -106,7 +106,7 @@ def draw_umbrella(base_x, canopy_c, stripe_c):
                 else:
                     set_pixel(cx, cy, stripe_c)
 
-# Waves — from original (3 rows with sine patterns)
+# Waves - from original (3 rows with sine patterns)
 _wave_offset = 0
 
 def draw_waves(offset):

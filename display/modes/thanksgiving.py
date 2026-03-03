@@ -1,4 +1,4 @@
-# modes/thanksgiving.py — Thanksgiving banner mode
+# modes/thanksgiving.py - Thanksgiving banner mode
 import random
 
 WIDTH = 128

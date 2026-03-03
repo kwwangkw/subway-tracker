@@ -1,4 +1,4 @@
-# modes/newyear.py — New Year banner mode (from Holidays/NewYear/code.py)
+# modes/newyear.py - New Year banner mode (from Holidays/NewYear/code.py)
 import random
 
 WIDTH = 128
@@ -9,7 +9,7 @@ def set_pixel(x, y, c):
     if 0 <= x < WIDTH and 0 <= y < HEIGHT:
         _bitmap[x, y] = c
 
-# Text — exact glyphs from original
+# Text - exact glyphs from original
 ALPHA = {
     'H': ["X...X","X...X","X...X","XXXXX","X...X","X...X","X...X"],
     'A': [".XXX.","X...X","X...X","XXXXX","X...X","X...X","X...X"],
@@ -57,7 +57,7 @@ def measure_word(word, spacing=1):
         w += len(glyph[0]) + spacing
     return w - spacing
 
-# Fireworks — exact system from original
+# Fireworks - exact system from original
 FIREWORK_COLORS = [1, 3, 4, 5, 6, 7]
 
 COLOR_TRIPLE = {

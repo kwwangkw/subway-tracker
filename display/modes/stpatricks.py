@@ -1,4 +1,4 @@
-# modes/stpatricks.py — St Patrick's Day banner mode (from Holidays/StPatricks/code.py)
+# modes/stpatricks.py - St Patrick's Day banner mode (from Holidays/StPatricks/code.py)
 import random
 
 WIDTH = 128
@@ -9,7 +9,7 @@ def set_pixel(x, y, c):
     if 0 <= x < WIDTH and 0 <= y < HEIGHT:
         _bitmap[x, y] = c
 
-# Shamrock shapes — exact from original
+# Shamrock shapes - exact from original
 SHAMROCK = [
     ".XX...XX.",
     "XXXX.XXXX",
@@ -46,7 +46,7 @@ def draw_shamrock(x, y, color, stem_color, small=False):
                 else:
                     set_pixel(x + col, y + row, color)
 
-# Text — exact glyphs from original
+# Text - exact glyphs from original
 ALPHA = {
     'H': ["X...X","X...X","X...X","XXXXX","X...X","X...X","X...X"],
     'A': [".XXX.","X...X","X...X","XXXXX","X...X","X...X","X...X"],
@@ -94,7 +94,7 @@ def measure_word(word, spacing=1):
         w += len(glyph[0]) + spacing
     return w - spacing
 
-# Floating shamrocks — from original (float upward)
+# Floating shamrocks - from original (float upward)
 NUM_SHAMS = 3
 SHAM_COLORS = [1]
 STEM_COLOR = 2
@@ -153,7 +153,7 @@ def _draw_text():
 
 
 def animate(bitmap):
-    # Update shamrocks — float upward like original
+    # Update shamrocks - float upward like original
     for i in range(NUM_SHAMS):
         b = i * 5
         sm = _shams[b + 4]

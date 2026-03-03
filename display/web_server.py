@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
-# web_server.py — Tiny HTTP server for mode switching
+# web_server.py - Tiny HTTP server for mode switching
 #
 # Serves a mobile-friendly page at http://display.local with mode buttons.
-# No external libraries needed — raw sockets only.
+# No external libraries needed - raw sockets only.
 
 import socketpool
 import mdns
@@ -14,7 +14,7 @@ _server_socket = None
 _pool = None
 _mdns_server = None  # must keep a reference so it doesn't get GC'd
 
-# Available modes — label shown on the web page
+# Available modes - label shown on the web page
 MODES = [
     ("train", "🚇 Train Sign"),
     ("clock", "🕐 Clock"),
@@ -30,11 +30,11 @@ MODES = [
     ("beachday", "🏖️ Beach Day"),
 ]
 
-# Current stop configs — initialized from settings.toml, changeable via web
+# Current stop configs - initialized from settings.toml, changeable via web
 _stops_config = []  # list of strings like ["721:7:N", "G24:G:S"]
 _pending_stops = None  # set by poll(), consumed by code.py
 
-# Clock/weather settings — initialized from settings.toml, changeable via web
+# Clock/weather settings - initialized from settings.toml, changeable via web
 _zip_code = "10001"
 _stock_symbols = "AAPL,GOOGL,MSFT"
 
@@ -82,9 +82,9 @@ def poll(current_mode):
     """Non-blocking check for HTTP requests.
 
     Returns dict with optional keys:
-        "mode" — new mode name to switch to
-        "stops" — new list of stop config strings
-        "settings" — dict with changed settings (zip)
+        "mode" - new mode name to switch to
+        "stops" - new list of stop config strings
+        "settings" - dict with changed settings (zip)
     Returns None if no actionable request.
     """
     if _server_socket is None:
@@ -93,7 +93,7 @@ def poll(current_mode):
     try:
         client, addr = _server_socket.accept()
     except OSError:
-        # No connection waiting — normal, return immediately
+        # No connection waiting - normal, return immediately
         return None
 
     result = None
@@ -119,7 +119,7 @@ def poll(current_mode):
                     _send_response(client, 404, "Not Found",
                                    body="Unknown mode")
             elif path == "/settings" and method == "POST":
-                # Get the body — may need a second recv if headers were long
+                # Get the body - may need a second recv if headers were long
                 body = ""
                 if "\r\n\r\n" in request:
                     body = request.split("\r\n\r\n", 1)[1]

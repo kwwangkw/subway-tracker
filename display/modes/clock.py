@@ -1,4 +1,4 @@
-# modes/clock.py — Digital Clock mode
+# modes/clock.py - Digital Clock mode
 #
 # Displays a large digital clock with date.
 # Uses NTP-synced time from mta_feed.EPOCH_OFFSET.
@@ -14,7 +14,7 @@ from mta_feed import EPOCH_OFFSET
 WIDTH = 128
 HEIGHT = 32
 
-# Timezone offset in hours from UTC — auto-set from weather API
+# Timezone offset in hours from UTC - auto-set from weather API
 TZ_OFFSET = int(os.getenv("CLOCK_TZ_OFFSET", "-5"))
 
 _bitmap = None
@@ -84,7 +84,7 @@ def _draw_small_text(x, y, text, color):
             for row_i in range(7):
                 if col_byte & (1 << row_i):
                     _set_pixel(x + col_i, y + row_i, color)
-        # Advance — most glyphs are 4 cols + 1 spacer, M/W/V are 5
+        # Advance - most glyphs are 4 cols + 1 spacer, M/W/V are 5
         x += w + 1
     return x
 
@@ -287,7 +287,7 @@ def animate(bitmap):
     # Check if h1 presence changed (e.g. 12:59 -> 1:00)
     h1_changed = (h1 != prev_h1)
     if h1_changed and (bool(h1) != bool(prev_h1)):
-        # Layout shift — full redraw needed
+        # Layout shift - full redraw needed
         _prev_digits = None
         _prev_date = None
         _last_minute = -1  # force re-entry

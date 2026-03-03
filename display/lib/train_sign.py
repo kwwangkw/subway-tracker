@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# train_sign.py — Display rendering for the subway train sign
+# train_sign.py - Display rendering for the subway train sign
 #
 # Draws the train arrival display on a displayio.Bitmap using the same
 # layout as TrainSign.ipynb:
@@ -40,7 +40,7 @@ DIR_GAP = 4         # minimum gap between direction and time text
 TIME_MARGIN = 2     # right margin for time text
 SCROLL_PAD = 20     # blank pixels between scroll repeats
 
-# Colors — we use a palette with indexed colors
+# Colors - we use a palette with indexed colors
 # Index 0 = black (background)
 # Index 1 = white (text)
 # Index 2 = divider
@@ -150,7 +150,7 @@ def _draw_text(bitmap, x, y, text, color_index):
 
 def _draw_text_scroll(bitmap, x, y, text, color_index, clip_left, clip_right, scroll_max=0):
     """Draw scrolling text flicker-free with a TRUE single-pass approach.
-    Each pixel in the clip region is written exactly once — either the glyph
+    Each pixel in the clip region is written exactly once - either the glyph
     color or black. No separate clear step, so the display never shows a
     blank frame between clear and draw.
     If scroll_max > 0, a second copy is drawn for seamless looping."""
@@ -219,7 +219,7 @@ def _draw_row_static(bitmap, y, line_color_index, line_char, row_index_text, dir
         direction: destination text (e.g. '34 ST-HUDSON')
         time_text: arrival time text (e.g. '3MIN')
     """
-    # Circle vertical position — matches notebook adjustments
+    # Circle vertical position - matches notebook adjustments
     if y == 0:
         circle_cy = y + ROW_H // 2 + 1  # top row: shift down 1px
     else:
@@ -236,7 +236,7 @@ def _draw_row_static(bitmap, y, line_color_index, line_char, row_index_text, dir
     # All text aligned to circle center
     text_baseline = circle_cy - 2
 
-    # Row index label — tight spacing (number + period with no gap)
+    # Row index label - tight spacing (number + period with no gap)
     num_trimmed = _TRIMMED.get(row_index_text[0]) or _TRIMMED.get(" ")
     _draw_text(bitmap, 3, text_baseline, row_index_text[0], COLOR_WHITE)
     # Draw period as single pixel right after number
@@ -247,14 +247,14 @@ def _draw_row_static(bitmap, y, line_color_index, line_char, row_index_text, dir
     time_x = WIDTH - time_width - TIME_MARGIN
     _draw_text(bitmap, time_x, text_baseline, time_text, COLOR_WHITE)
 
-    # Direction text — only draw static if it fits
+    # Direction text - only draw static if it fits
     clip_right = time_x - DIR_GAP
     dir_w = _measure_text(direction)
     if dir_w <= (clip_right - TEXT_X):
         _draw_text(bitmap, TEXT_X, text_baseline, direction, COLOR_WHITE)
 
 
-# Worst-case time width — used for stable scroll clip boundary
+# Worst-case time width - used for stable scroll clip boundary
 _WORST_TIME_W = None
 
 def _worst_time_w():
@@ -293,7 +293,7 @@ def create_display_group(brightness=None):
         brightness: float 0.0–1.0 to scale all colors. Defaults to BRIGHTNESS.
 
     Returns:
-        (group, bitmap, palette) — the group to show on display,
+        (group, bitmap, palette) - the group to show on display,
         and the bitmap/palette for updating.
     """
     if brightness is None:
@@ -401,7 +401,7 @@ def update_display_scroll(bitmap, arrivals, scroll_offsets, scroll_maxes):
 def update_time_only(bitmap, arrivals):
     """
     Redraw ONLY the time text for each row (right-aligned).
-    Clears just the time region, no full screen clear — prevents flicker.
+    Clears just the time region, no full screen clear - prevents flicker.
     """
     row_positions = [ROW1_Y, ROW2_Y]
 
@@ -435,7 +435,7 @@ def update_time_only(bitmap, arrivals):
 
 def update_display(bitmap, palette, arrivals, scroll_offsets=None):
     """
-    Legacy full redraw — clears and redraws everything.
+    Legacy full redraw - clears and redraws everything.
     Used for initial draw and data refreshes.
 
     Args:
@@ -495,7 +495,7 @@ def draw_loading_screen(bitmap, palette):
     l2_x = (WIDTH - _measure_text(l2)) // 2
 
     _draw_text(bitmap, l1_x, top_y, l1, COLOR_WHITE)
-    # Only draw "LOADING" initially — dots will animate in
+    # Only draw "LOADING" initially - dots will animate in
     _draw_text(bitmap, l2_x, top_y + line_h + gap, "LOADING", COLOR_WHITE)
 
     # Return info needed for dot animation

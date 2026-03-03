@@ -1,4 +1,4 @@
-# modes/halloween.py — Halloween banner mode
+# modes/halloween.py - Halloween banner mode
 import math
 
 WIDTH = 128

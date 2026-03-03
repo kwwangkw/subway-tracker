@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# code.py — Main entry point with mode switching
+# code.py - Main entry point with mode switching
 #
 # Hardware: Adafruit MatrixPortal S3 + two chained 64x32 HUB75 LED matrices
 # Display: 128x32 pixels total
@@ -37,7 +37,7 @@ MODE_FILE = "/mode.txt"
 DEFAULT_MODE = "train"
 
 # ---------------------------------------------------------------
-# Display setup — two chained 64x32 HUB75 panels = 128x32
+# Display setup - two chained 64x32 HUB75 panels = 128x32
 # ---------------------------------------------------------------
 displayio.release_displays()
 
@@ -71,7 +71,7 @@ display.root_group = group
 draw_loading_screen(bitmap, palette)
 
 # ---------------------------------------------------------------
-# Watchdog — auto-reboot if code hangs for > 30 seconds
+# Watchdog - auto-reboot if code hangs for > 30 seconds
 # ---------------------------------------------------------------
 wdt = microcontroller.watchdog
 wdt.timeout = 30
@@ -287,7 +287,7 @@ def _get_holiday_mode():
         if month == 12 and day == 25:
             return "christmas"
 
-        # Thanksgiving — 4th Thursday of November
+        # Thanksgiving - 4th Thursday of November
         if month == 11:
             # Find the 4th Thursday: weekday 3 (Mon=0)
             # tm_wday: 0=Monday ... 6=Sunday
@@ -331,7 +331,7 @@ _last_holiday_check_day = -1
 while True:
     wdt.feed()
 
-    # Daily check — if we're still on a holiday mode after the holiday, revert
+    # Daily check - if we're still on a holiday mode after the holiday, revert
     try:
         _now_t = time.localtime(time.time() + mta_feed.EPOCH_OFFSET)
         _today = _now_t.tm_mday

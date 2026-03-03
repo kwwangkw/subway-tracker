@@ -1,4 +1,4 @@
-# modes/valentines.py — Valentine's Day banner mode (from Holidays/Valentines/code.py)
+# modes/valentines.py - Valentine's Day banner mode (from Holidays/Valentines/code.py)
 import random
 
 WIDTH = 128
@@ -9,7 +9,7 @@ def set_pixel(x, y, c):
     if 0 <= x < WIDTH and 0 <= y < HEIGHT:
         _bitmap[x, y] = c
 
-# Heart shapes — exact from original
+# Heart shapes - exact from original
 BIG_HEART = [
     ".XX.XX.",
     "XXXXXXX",
@@ -40,7 +40,7 @@ def erase_heart(x, y, small=False):
             if c == 'X':
                 set_pixel(x + col, y + row, 0)
 
-# Text — exact glyphs from original
+# Text - exact glyphs from original
 ALPHA = {
     'H': ["X...X","X...X","X...X","XXXXX","X...X","X...X","X...X"],
     'A': [".XXX.","X...X","X...X","XXXXX","X...X","X...X","X...X"],
@@ -89,7 +89,7 @@ def measure_word(word, spacing=1):
         w += len(glyph[0]) + spacing
     return w - spacing
 
-# Floating hearts — from original (float upward)
+# Floating hearts - from original (float upward)
 NUM_HEARTS = 8
 HEART_COLORS = [1, 1, 2, 2, 4, 5, 6, 7]
 _hearts = None  # flat: [x, y, speed, color, small] * NUM_HEARTS
@@ -147,7 +147,7 @@ def _draw_text():
 
 
 def animate(bitmap):
-    # Update hearts — float upward like original
+    # Update hearts - float upward like original
     for i in range(NUM_HEARTS):
         b = i * 5
         sm = _hearts[b + 4]

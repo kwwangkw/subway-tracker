@@ -1,1 +1,1 @@
-# modes/__init__.py — Mode registry
+# modes/__init__.py - Mode registry

@@ -1,4 +1,4 @@
-# modes/stocks.py — Stock Ticker display mode
+# modes/stocks.py - Stock Ticker display mode
 #
 # Shows stock quotes cycling through configured symbols.
 # Uses Yahoo Finance chart API (free, no key, no rate limit).
@@ -326,7 +326,7 @@ def animate(bitmap):
     change_x = WIDTH - change_w - 2
     pct_x = WIDTH - pct_w - 2
 
-    # Arrow indicator — left of the wider text block, vertically centered
+    # Arrow indicator - left of the wider text block, vertically centered
     wider_x = min(change_x, pct_x)
     arrow_x = wider_x - 8
     arrow_y = line1_y + 5  # centered between the two text lines

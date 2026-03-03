@@ -1,4 +1,4 @@
-# modes/christmas.py — Christmas banner mode
+# modes/christmas.py - Christmas banner mode
 import random
 
 WIDTH = 128

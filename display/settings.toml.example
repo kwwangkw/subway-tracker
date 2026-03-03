@@ -1,4 +1,4 @@
-# settings.toml — CircuitPython configuration
+# settings.toml - CircuitPython configuration
 # Copy this file to the CIRCUITPY drive root as settings.toml
 
 # ----- Wi-Fi credentials -----
@@ -9,8 +9,8 @@ CIRCUITPY_WIFI_PASSWORD = "YourWiFiPassword"
 # Comma-separated list of stop configs to monitor.
 # Format per entry: stop_id:line:direction
 #   stop_id   = GTFS stop ID (find yours in MTA GTFS static feed stops.txt)
-#   line      = subway line letter/number (optional — omit to match any line)
-#   direction = N (northbound) or S (southbound) (optional — omit for both)
+#   line      = subway line letter/number (optional - omit to match any line)
+#   direction = N (northbound) or S (southbound) (optional - omit for both)
 #
 # Examples:
 #   "721:7:N"            = 7 train Manhattan-bound at Vernon Blvd-Jackson Av
@@ -36,7 +36,7 @@ MTA_BRIGHTNESS = "0.12"
 CLOCK_TZ_OFFSET = "-5"
 
 # ----- Weather Mode -----
-# US zip code — sets weather location and auto-detects timezone
+# US zip code - sets weather location and auto-detects timezone
 WEATHER_ZIP = "10001"
 
 # ----- Stocks Mode -----

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# mta_feed.py — Fetch MTA subway realtime arrival data
+# mta_feed.py - Fetch MTA subway realtime arrival data
 #
 # The MTA GTFS-RT feeds use Protocol Buffers. CircuitPython doesn't have a
 # protobuf library, so we do minimal manual parsing of the binary format to
@@ -14,7 +14,7 @@ import os
 # Offset = 946684800 seconds (30 years).
 # We add this to time.time() to get a Unix-compatible timestamp.
 try:
-    # On CPython, time.time() already returns Unix epoch — no offset needed
+    # On CPython, time.time() already returns Unix epoch - no offset needed
     if time.time() > 1_000_000_000:
         EPOCH_OFFSET = 0
     else:
@@ -54,9 +54,9 @@ for group, url in FEED_URLS.items():
         LINE_TO_FEED[ch] = group
 
 # Multi-char route IDs for shuttles
-LINE_TO_FEED["GS"] = "1234567S"   # 42nd St Shuttle — in the main feed
-LINE_TO_FEED["FS"] = "BDFM"       # Franklin Ave Shuttle — in the BDFM feed
-LINE_TO_FEED["H"] = "ACEH"        # Rockaway Park Shuttle — in the ACE feed
+LINE_TO_FEED["GS"] = "1234567S"   # 42nd St Shuttle - in the main feed
+LINE_TO_FEED["FS"] = "BDFM"       # Franklin Ave Shuttle - in the BDFM feed
+LINE_TO_FEED["H"] = "ACEH"        # Rockaway Park Shuttle - in the ACE feed
 
 
 # ---------------------------------------------------------------
@@ -127,7 +127,7 @@ def _parse_stop_time_update(data):
     Field 4: stop_id (string)
     Field 2: arrival (StopTimeEvent)
       Field 2.2: time (int64 as varint in some feeds, or fixed64)
-    Field 3: departure (StopTimeEvent) — used as fallback for arrival time
+    Field 3: departure (StopTimeEvent) - used as fallback for arrival time
     """
     stop_id = None
     arrival_time = None
@@ -140,7 +140,7 @@ def _parse_stop_time_update(data):
             except Exception:
                 stop_id = str(val)
         elif fn == 2 and wt == LENGTH_DELIMITED:
-            # arrival StopTimeEvent — parse its sub-fields
+            # arrival StopTimeEvent - parse its sub-fields
             for sfn, swt, sval in _iter_fields(val):
                 if sfn == 2:  # time field
                     if swt == VARINT:
@@ -149,7 +149,7 @@ def _parse_stop_time_update(data):
                         # little-endian int64
                         arrival_time = int.from_bytes(sval, "little")
         elif fn == 3 and wt == LENGTH_DELIMITED and arrival_time is None:
-            # departure StopTimeEvent — fallback if no arrival time
+            # departure StopTimeEvent - fallback if no arrival time
             for sfn, swt, sval in _iter_fields(val):
                 if sfn == 2:  # time field
                     if swt == VARINT:
@@ -164,11 +164,11 @@ def _parse_trip_update(data):
     """
     Parse a TripUpdate message.
     Field 1: trip descriptor (TripDescriptor)
-      Field 1.1: trip_id (string) — contains route info
+      Field 1.1: trip_id (string) - contains route info
       Field 1.5: route_id (string)
-    Field 2: stop_time_update (repeated) — NOT collected, iterate raw data instead
+    Field 2: stop_time_update (repeated) - NOT collected, iterate raw data instead
 
-    Returns (route_id, trip_id, raw_data) — caller iterates field 2 entries
+    Returns (route_id, trip_id, raw_data) - caller iterates field 2 entries
     lazily via _iter_stop_time_updates(raw_data) to avoid list allocation.
     """
     route_id = None
@@ -195,7 +195,7 @@ def _parse_trip_update(data):
 
 def _iter_stop_time_updates(trip_update_data):
     """Yield each StopTimeUpdate (field 2) from raw TripUpdate data.
-    Generator — no list allocated."""
+    Generator - no list allocated."""
     for fn, wt, val in _iter_fields(trip_update_data):
         if fn == 2 and wt == LENGTH_DELIMITED:
             yield val
@@ -217,7 +217,7 @@ def _parse_feed_entity(data):
 def _parse_feed_message(data):
     """
     Parse the top-level FeedMessage as a generator.
-    Field 1: header (FeedHeader) — skip
+    Field 1: header (FeedHeader) - skip
     Field 2: entity (repeated FeedEntity)
     Yields entity data one at a time to avoid holding all in memory.
     """

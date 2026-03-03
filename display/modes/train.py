@@ -1,4 +1,4 @@
-# modes/train.py — Train Sign mode wrapper
+# modes/train.py - Train Sign mode wrapper
 #
 # Wraps the existing TrainSign code into the setup()/animate() interface.
 # Unlike holiday modes, this needs WiFi, NTP, and HTTP session.

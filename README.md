@@ -17,7 +17,7 @@ Real-time NYC subway arrival display powered by an **Adafruit MatrixPortal S3** 
 
 1. Plug the MatrixPortal S3 directly into the **input** HUB75 connector of the first panel
 2. Chain the second panel using a ribbon cable from **output** of panel 1 → **input** of panel 2
-3. Power both panels (use a Y-splitter or separate power cables — each panel draws up to 4A at full white)
+3. Power both panels (use a Y-splitter or separate power cables - each panel draws up to 4A at full white)
 4. Connect USB-C for data/programming
 
 ## Software Setup
@@ -81,19 +81,19 @@ STOCK_SYMBOLS = "AAPL,GOOGL,MSFT"
 ```
 
 The `MTA_STOPS` format is `stop_id:line:direction` where:
-- **stop_id** — GTFS stop ID (e.g. `721`, `G24`)
-- **line** — subway line letter/number to filter (e.g. `7`, `G`). Omit to match any line at that stop.
-- **direction** — `N` (northbound/Queens/Bronx-bound) or `S` (southbound/Brooklyn-bound). Omit for both.
+- **stop_id** - GTFS stop ID (e.g. `721`, `G24`)
+- **line** - subway line letter/number to filter (e.g. `7`, `G`). Omit to match any line at that stop.
+- **direction** - `N` (northbound/Queens/Bronx-bound) or `S` (southbound/Brooklyn-bound). Omit for both.
 
 ### Finding Your Stop ID
 
-Each subway station has a GTFS stop ID. The direction suffix (`N` or `S`) is added automatically — you only need the base ID (e.g. `721`, not `721N`).
+Each subway station has a GTFS stop ID. The direction suffix (`N` or `S`) is added automatically - you only need the base ID (e.g. `721`, not `721N`).
 
 #### Method 1: Download the MTA GTFS Static Feed
 
 1. Download the static feed: [google_transit.zip](http://web.mta.info/developers/data/nyct/subway/google_transit.zip)
 2. Unzip and open `stops.txt`
-3. Search for your station name — the `stop_id` column has the ID you need
+3. Search for your station name - the `stop_id` column has the ID you need
 4. Rows with `location_type=1` are the parent stations (use that ID)
 
 ```bash
@@ -105,7 +105,7 @@ grep -i "your station name" /tmp/gtfs/stops.txt
 
 #### Method 2: MTA Subway Stations Dataset
 
-Browse the [MTA Subway Stations](https://data.ny.gov/Transportation/MTA-Subway-Stations/39hk-dx4f) dataset on NY Open Data — the `GTFS Stop ID` column has the IDs.
+Browse the [MTA Subway Stations](https://data.ny.gov/Transportation/MTA-Subway-Stations/39hk-dx4f) dataset on NY Open Data - the `GTFS Stop ID` column has the IDs.
 
 #### Common Stop IDs
 
@@ -140,8 +140,8 @@ Each line's arrivals come from a specific feed. The code handles this automatica
 
 #### Direction Reference
 
-- **N (Northbound)** — generally toward Manhattan, Uptown, Queens, or the Bronx
-- **S (Southbound)** — generally toward Brooklyn, Downtown, or Coney Island
+- **N (Northbound)** - generally toward Manhattan, Uptown, Queens, or the Bronx
+- **S (Southbound)** - generally toward Brooklyn, Downtown, or Coney Island
 
 Check the [MTA map](https://map.mta.info/) if you're unsure which direction you need.
 
@@ -175,13 +175,13 @@ Each row shows:
 
 ## Display Modes
 
-The display includes a clock, weather display, and 8 animated holiday modes — all switchable instantly via the [web interface](#mode-switching-via-web-interface). No file swapping or reboot needed — just tap a button.
+The display includes a clock, weather display, and 8 animated holiday modes - all switchable instantly via the [web interface](#mode-switching-via-web-interface). No file swapping or reboot needed - just tap a button.
 
 | Mode | Mode File | Description |
 |------|-----------|-------------|
-| 🕐 Clock | `modes/clock.py` | Large digital clock with date — timezone auto-detected from zip code |
+| 🕐 Clock | `modes/clock.py` | Large digital clock with date - timezone auto-detected from zip code |
 | 🌤️ Weather | `modes/weather.py` | Current temperature, high/low, conditions icon, and time via Open-Meteo API |
-| 📈 Stocks | `modes/stocks.py` | Live stock ticker cycling through configured symbols — price, change, and percent via Yahoo Finance (free, no API key) |
+| 📈 Stocks | `modes/stocks.py` | Live stock ticker cycling through configured symbols - price, change, and percent via Yahoo Finance (free, no API key) |
 | 🏖️ Beach Day | `modes/beachday.py` | Scrolling ocean waves, sun, sand, and colorful beach umbrellas |
 | 🎄 Christmas | `modes/christmas.py` | Falling snowflakes and Christmas trees with blinking lights |
 | 🎃 Halloween | `modes/halloween.py` | Bobbing spiders on web threads and animated bats |
@@ -218,7 +218,7 @@ The display automatically switches to the matching holiday mode on these days:
 | October 31 | 🎃 Halloween |
 | December 25 | 🎄 Christmas |
 
-This works both on boot and at midnight if the display is already running. If you manually switch modes via the web UI, the auto-switch is skipped for the rest of the day — but resets the next midnight so the next holiday can still trigger.
+This works on boot - if today is a holiday, the display starts in that mode instead of the last-used mode. The day after a holiday, the display automatically reverts to your saved default mode at midnight. You can always switch modes manually via the web UI at any time.
 
 ### Mode Switching via Web Interface
 
@@ -231,9 +231,9 @@ Once connected to Wi-Fi, the display runs a built-in web server for switching mo
 
 Tap any mode button to instantly switch. The **Settings** section (collapsible) lets you configure:
 
-- **Train Stops** — station/line/direction for the train sign
-- **Zip Code** — sets weather location and auto-detects timezone for the clock
-- **Stock Symbols** — comma-separated tickers for stock mode (e.g. `AAPL,GOOGL,MSFT`)
+- **Train Stops** - station/line/direction for the train sign
+- **Zip Code** - sets weather location and auto-detects timezone for the clock
+- **Stock Symbols** - comma-separated tickers for stock mode (e.g. `AAPL,GOOGL,MSFT`)
 
 > **Tip:** If `display.local` doesn't resolve, use the board's IP address (printed to the serial console on boot).
 
@@ -246,8 +246,8 @@ Shown briefly on boot while connecting to Wi-Fi and fetching the first batch of 
 The `TrainSign.ipynb` notebook is a Pillow-based mock of the LED display for prototyping the layout without hardware. Run it to preview what the display looks like.
 
 The `TrainSign/test/` folder contains standalone test files that run on the hardware without Wi-Fi:
-- `code.py` — scrolling display test with sample data
-- `no_wifi_screen.py` — preview of the "No WiFi" error screen
+- `code.py` - scrolling display test with sample data
+- `no_wifi_screen.py` - preview of the "No WiFi" error screen
 
 ## Debugging via Serial Console
 
@@ -283,7 +283,7 @@ Row 1: G → Church Av           8min
 
 Press `Ctrl-A` then `K`, then `Y` to confirm.
 
-> **Tip:** If the serial port doesn't appear, try a different USB-C cable — some cables are charge-only and don't carry data. Also, the port disappears briefly when the board resets.
+> **Tip:** If the serial port doesn't appear, try a different USB-C cable - some cables are charge-only and don't carry data. Also, the port disappears briefly when the board resets.
 
 > **Tip:** You can also press `Ctrl-C` in the serial console to drop into the CircuitPython REPL, and `Ctrl-D` to soft-reboot the board.
 

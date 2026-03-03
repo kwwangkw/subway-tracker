@@ -1,4 +1,4 @@
-# modes/weather.py — Weather display mode
+# modes/weather.py - Weather display mode
 #
 # Shows current temperature and conditions using Open-Meteo API (free, no key).
 # Configure WEATHER_ZIP and CLOCK_TZ_OFFSET in settings.toml.

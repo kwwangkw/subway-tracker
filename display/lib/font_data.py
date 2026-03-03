@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# font_data.py — Bitmap font definitions for the train sign display
+# font_data.py - Bitmap font definitions for the train sign display
 # -----------------------------
 # 5x7 bitmap font (column-encoded, LSB = top row)
 # Each character is a list of 5 column bytes.
@@ -258,7 +258,7 @@ FONT_5x5 = {
 
 
 # -------------------------------------------------------
-# MTA official line colors (R, G, B) — 0-255 range
+# MTA official line colors (R, G, B) - 0-255 range
 # -------------------------------------------------------
 LINE_COLORS = {
     # IRT lines (red)
@@ -292,7 +292,7 @@ LINE_COLORS = {
     "Q": (0xFC, 0xCC, 0x0A),
     "R": (0xFC, 0xCC, 0x0A),
     "W": (0xFC, 0xCC, 0x0A),
-    # Shuttles (dark gray — official MTA shuttle color)
+    # Shuttles (dark gray - official MTA shuttle color)
     "S": (0x7C, 0x85, 0x8C),
     "GS": (0x7C, 0x85, 0x8C),
     "FS": (0x7C, 0x85, 0x8C),
