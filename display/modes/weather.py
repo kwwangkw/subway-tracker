@@ -419,15 +419,15 @@ def _build_bottom_text():
     bottom_str = f"{time_str} - {condition.upper()}"
     bottom_w = _measure_text(bottom_str)
     if bottom_w > WIDTH:
-        bottom_str = condition.upper()
-        bottom_w = _measure_text(bottom_str)
-    return bottom_str, bottom_w
+        # Too wide: only show condition in bottom bar, time will be drawn elsewhere
+        return condition.upper(), _measure_text(condition.upper()), time_str
+    return bottom_str, bottom_w, None
 
 
 def _draw_bottom_text():
     """Draw the bottom time/condition bar, clearing old text first."""
     global _prev_bottom_str, _prev_bottom_x
-    bottom_str, bottom_w = _build_bottom_text()
+    bottom_str, bottom_w, time_only = _build_bottom_text()
     bottom_y = 24
     bottom_x = (WIDTH - bottom_w) // 2
     # Clear previous bottom text area
@@ -437,6 +437,13 @@ def _draw_bottom_text():
     _draw_small_text(bottom_x, bottom_y, bottom_str, 5)
     _prev_bottom_str = bottom_str
     _prev_bottom_x = bottom_x
+    # If time_only is not None, draw the time under the temp/icon
+    if time_only is not None:
+        # Left-align under temp/icon (y=18)
+        time_x = 12  # same as icon left edge
+        time_w = _measure_text(time_only)
+        _clear_rect(time_x, 15, time_w, 7)
+        _draw_small_text(time_x, 15, time_only, 5)
 
 
 def animate(bitmap):

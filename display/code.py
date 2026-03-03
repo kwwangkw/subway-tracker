@@ -364,6 +364,7 @@ while True:
         pass
 
     # Check for mode switch or stop change via HTTP
+
     action = web_server.poll(current_mode_name)
     if action is not None:
         # Handle settings change
@@ -381,6 +382,9 @@ while True:
                 import sys
                 if "modes.stocks" in sys.modules:
                     sys.modules["modes.stocks"].update_config(symbols=s["symbols"])
+                # If currently in stocks mode, update immediately
+                if current_mode_name == "stocks" and current_module is not None:
+                    current_module.update_config(symbols=s["symbols"])
 
         # Handle mode switch
         new_mode = action.get("mode")
