@@ -1,3 +1,4 @@
+# Created by Kevin Wang - https://github.com/kwwangkw/
 # modes/beachday.py - Beach Day banner mode (from Holidays/BeachDay/code.py)
 import math
 

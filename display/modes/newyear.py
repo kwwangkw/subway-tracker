@@ -1,3 +1,4 @@
+# Created by Kevin Wang - https://github.com/kwwangkw/
 # modes/newyear.py - New Year banner mode (from Holidays/NewYear/code.py)
 import random
 

@@ -1,3 +1,4 @@
+# Created by Kevin Wang - https://github.com/kwwangkw/
 # modes/christmas.py - Christmas banner mode
 import random
 

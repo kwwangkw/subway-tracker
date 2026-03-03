@@ -1,3 +1,4 @@
+# Created by Kevin Wang - https://github.com/kwwangkw/
 # modes/stocks.py - Stock Ticker display mode
 #
 # Shows stock quotes cycling through configured symbols.

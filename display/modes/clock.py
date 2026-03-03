@@ -1,3 +1,4 @@
+# Created by Kevin Wang - https://github.com/kwwangkw/
 # modes/clock.py - Digital Clock mode
 #
 # Displays a large digital clock with date.

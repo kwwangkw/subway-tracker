@@ -1,3 +1,4 @@
+# Created by Kevin Wang - https://github.com/kwwangkw/
 # modes/valentines.py - Valentine's Day banner mode (from Holidays/Valentines/code.py)
 import random
 

@@ -1,3 +1,4 @@
+# Created by Kevin Wang - https://github.com/kwwangkw/
 # modes/thanksgiving.py - Thanksgiving banner mode
 import random
 

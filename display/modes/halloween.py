@@ -1,3 +1,4 @@
+# Created by Kevin Wang - https://github.com/kwwangkw/
 # modes/halloween.py - Halloween banner mode
 import math
 

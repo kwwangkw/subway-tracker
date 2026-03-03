@@ -1,3 +1,4 @@
+# Created by Kevin Wang - https://github.com/kwwangkw/
 # modes/july4th.py - July 4th banner mode (from Holidays/July4th/code.py)
 import random
 

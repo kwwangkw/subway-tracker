@@ -1,3 +1,4 @@
+# Created by Kevin Wang - https://github.com/kwwangkw/
 # modes/weather.py - Weather display mode
 #
 # Shows current temperature and conditions using Open-Meteo API (free, no key).

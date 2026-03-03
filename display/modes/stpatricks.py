@@ -1,3 +1,4 @@
+# Created by Kevin Wang - https://github.com/kwwangkw/
 # modes/stpatricks.py - St Patrick's Day banner mode (from Holidays/StPatricks/code.py)
 import random
 

@@ -1,3 +1,4 @@
+# Created by Kevin Wang - https://github.com/kwwangkw/
 # modes/train.py - Train Sign mode wrapper
 #
 # Wraps the existing TrainSign code into the setup()/animate() interface.
