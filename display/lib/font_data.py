@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MIT
+# Created by Kevin Wang - https://github.com/kwwangkw/
 # font_data.py - Bitmap font definitions for the train sign display
 # -----------------------------
 # 5x7 bitmap font (column-encoded, LSB = top row)

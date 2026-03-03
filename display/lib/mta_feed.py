@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MIT
+# Created by Kevin Wang - https://github.com/kwwangkw/
 # mta_feed.py - Fetch MTA subway realtime arrival data
 #
 # The MTA GTFS-RT feeds use Protocol Buffers. CircuitPython doesn't have a

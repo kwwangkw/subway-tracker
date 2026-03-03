@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MIT
+# Created by Kevin Wang - https://github.com/kwwangkw/
 # train_sign.py - Display rendering for the subway train sign
 #
 # Draws the train arrival display on a displayio.Bitmap using the same

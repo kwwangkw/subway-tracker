@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MIT
+# Created by Kevin Wang - https://github.com/kwwangkw/
 # code.py - Main entry point with mode switching
 #
 # Hardware: Adafruit MatrixPortal S3 + two chained 64x32 HUB75 LED matrices

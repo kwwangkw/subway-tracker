@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MIT
+# Created by Kevin Wang - https://github.com/kwwangkw/
 # web_server.py - Tiny HTTP server for mode switching
 #
 # Serves a mobile-friendly page at http://display.local with mode buttons.
