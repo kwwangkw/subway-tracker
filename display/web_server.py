@@ -16,11 +16,14 @@ _pool = None
 _mdns_server = None  # must keep a reference so it doesn't get GC'd
 
 # Available modes - label shown on the web page
-MODES = [
-    ("train", "🚇 Train Sign"),
+GENERAL_MODES = [
+    ("train", "🚇 Subway"),
     ("clock", "🕐 Clock"),
     ("weather", "🌤️ Weather"),
     ("stocks", "📈 Stocks"),
+]
+
+HOLIDAY_MODES = [
     ("halloween", "🎃 Halloween"),
     ("christmas", "🎄 Christmas"),
     ("thanksgiving", "🦃 Thanksgiving"),
@@ -29,7 +32,10 @@ MODES = [
     ("valentines", "💕 Valentine's Day"),
     ("stpatricks", "☘️ St. Patrick's"),
     ("beachday", "🏖️ Beach Day"),
+    ("birthday", "🎂 Birthday"),
 ]
+
+MODES = GENERAL_MODES + HOLIDAY_MODES
 
 # Current stop configs - initialized from settings.toml, changeable via web
 _stops_config = []  # list of strings like ["721:7:N", "G24:G:S"]
@@ -38,12 +44,13 @@ _pending_stops = None  # set by poll(), consumed by code.py
 # Clock/weather settings - initialized from settings.toml, changeable via web
 _zip_code = "10001"
 _stock_symbols = "AAPL,GOOGL,MSFT"
+_birthdays = ""  # Name:MM-DD,Name:MM-DD
 
 
 def start(pool, port=80):
     """Start the HTTP server on the given port. Returns True if successful."""
     global _server_socket, _pool, _mdns_server, _stops_config
-    global _zip_code, _stock_symbols
+    global _zip_code, _stock_symbols, _birthdays
     _pool = pool
 
     # Initialize stops from settings.toml
@@ -55,6 +62,9 @@ def start(pool, port=80):
 
     # Initialize stock symbols from settings.toml
     _stock_symbols = os.getenv("STOCK_SYMBOLS", "AAPL,GOOGL,MSFT")
+
+    # Initialize birthdays from settings.toml
+    _birthdays = os.getenv("BIRTHDAYS", "")
 
     # Set up mDNS so http://display.local works
     try:
@@ -160,7 +170,7 @@ def _parse_settings_form(body):
 
     Returns dict with changed values, or None.
     """
-    global _zip_code, _stock_symbols
+    global _zip_code, _stock_symbols, _birthdays
     fields = {}
     for pair in body.split("&"):
         if "=" in pair:
@@ -209,6 +219,13 @@ def _parse_settings_form(body):
         if new_sym != _stock_symbols:
             _stock_symbols = new_sym
             changed["symbols"] = new_sym
+
+    # Birthdays
+    if "birthdays" in fields:
+        new_bd = fields["birthdays"].strip()
+        if new_bd != _birthdays:
+            _birthdays = new_bd
+            changed["birthdays"] = new_bd
 
     if changed:
         print(f"Settings updated: {changed}")
@@ -269,8 +286,6 @@ _CSS = (
     "color:#fff;text-decoration:none;border-radius:10px;font-size:1.1em;"
     "text-align:center;border:1px solid #333}"
     ".b.a{background:#1a3a1a;border-color:#2d5a2d;color:#6f6}"
-    "h2{margin:24px 0 12px;font-size:1em;color:#aaa;border-top:1px solid #333;"
-    "padding-top:16px}"
     ".row{margin:8px 0}"
     ".row label{display:block;color:#888;font-size:.8em;margin-bottom:4px}"
     ".row input{width:100%;padding:10px 12px;background:#222;color:#fff;"
@@ -289,11 +304,21 @@ _CSS = (
     "summary::before{content:'\\25b6';font-size:.7em;transition:transform .2s}"
     "details[open] summary::before{transform:rotate(90deg)}"
     "details .inner{padding-top:8px}"
+    ".tabs{margin-top:12px}"
+    ".tabs input[type=radio]{display:none}"
+    ".tabs label{display:inline-block;padding:10px 20px;background:#222;"
+    "color:#888;border:1px solid #333;border-radius:10px 10px 0 0;"
+    "cursor:pointer;font-size:1em;margin-right:4px}"
+    ".tabs input[type=radio]:checked+label{background:#1a3a1a;color:#6f6;"
+    "border-color:#2d5a2d}"
+    ".tp{display:none;padding-top:4px}"
+    "#t1:checked~#p1{display:block}"
+    "#t2:checked~#p2{display:block}"
     "</style>"
 )
 
 _LABELS = {
-    "train": "Train Sign",
+    "train": "Subway",
     "clock": "Clock",
     "weather": "Weather",
     "stocks": "Stocks",
@@ -305,6 +330,7 @@ _LABELS = {
     "valentines": "Valentines",
     "stpatricks": "St Patricks",
     "beachday": "Beach Day",
+    "birthday": "Birthday",
 }
 
 
@@ -326,9 +352,20 @@ def _send_page(client, current_mode):
     parts.append("</div>")
 
     # --- Mode buttons ---
-    parts.append("<h2>Mode</h2>")
+    _is_holiday = any(m[0] == current_mode for m in HOLIDAY_MODES)
+    parts.append('<div class="tabs">')
+    if _is_holiday:
+        parts.append('<input type="radio" id="t1" name="tab">')
+        parts.append('<label for="t1">General</label>')
+        parts.append('<input type="radio" id="t2" name="tab" checked>')
+    else:
+        parts.append('<input type="radio" id="t1" name="tab" checked>')
+        parts.append('<label for="t1">General</label>')
+        parts.append('<input type="radio" id="t2" name="tab">')
+    parts.append('<label for="t2">Holidays</label>')
+    parts.append('<div class="tp" id="p1">')
 
-    for mode_id, _emoji_label in MODES:
+    for mode_id, _emoji_label in GENERAL_MODES:
         lbl = _LABELS.get(mode_id, mode_id)
         if mode_id == current_mode:
             parts.append('<a class="b a" href="#">')
@@ -340,6 +377,23 @@ def _send_page(client, current_mode):
             parts.append('">')
             parts.append(lbl)
             parts.append("</a>")
+
+    parts.append('</div><div class="tp" id="p2">')
+
+    for mode_id, _emoji_label in HOLIDAY_MODES:
+        lbl = _LABELS.get(mode_id, mode_id)
+        if mode_id == current_mode:
+            parts.append('<a class="b a" href="#">')
+            parts.append(lbl)
+            parts.append(" [ON]</a>")
+        else:
+            parts.append('<a class="b" href="/mode/')
+            parts.append(mode_id)
+            parts.append('">')
+            parts.append(lbl)
+            parts.append("</a>")
+
+    parts.append('</div></div>')
 
     # --- Collapsible settings ---
     parts.append("<details>")
@@ -368,6 +422,13 @@ def _send_page(client, current_mode):
     parts.append(_stock_symbols)
     parts.append('" placeholder="AAPL,GOOGL,MSFT"></div>')
     parts.append('<div class="hint">Comma-separated ticker symbols</div>')
+
+    # Birthdays
+    parts.append('<div class="row"><label>Birthdays</label>')
+    parts.append('<input name="birthdays" value="')
+    parts.append(_birthdays)
+    parts.append('" placeholder="Alice:3-14,Bob:7-22"></div>')
+    parts.append('<div class="hint">Name:MM-DD comma-separated</div>')
 
     parts.append('<button type="submit" class="sb">Save</button>')
     parts.append("</form>")

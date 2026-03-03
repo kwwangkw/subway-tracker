@@ -78,6 +78,9 @@ WEATHER_ZIP = "10001"
 
 # Stock ticker symbols (comma-separated)
 STOCK_SYMBOLS = "AAPL,GOOGL,MSFT"
+
+# Birthday list (Name:MM-DD, comma-separated)
+BIRTHDAYS = "Jon:1-1,Emily:7-23"
 ```
 
 The `MTA_STOPS` format is `stop_id:line:direction` where:
@@ -175,7 +178,7 @@ Each row shows:
 
 ## Display Modes
 
-The display includes a clock, weather display, and 8 animated holiday modes - all switchable instantly via the [web interface](#mode-switching-via-web-interface). No file swapping or reboot needed - just tap a button.
+The display includes a clock, weather display, and 9 animated holiday modes - all switchable instantly via the [web interface](#mode-switching-via-web-interface). No file swapping or reboot needed - just tap a button.
 
 | Mode | Mode File | Description |
 |------|-----------|-------------|
@@ -190,13 +193,14 @@ The display includes a clock, weather display, and 8 animated holiday modes - al
 | ☘️ St. Patrick's Day | `modes/stpatricks.py` | Floating shamrocks in multiple shades of green |
 | 🍂 Thanksgiving | `modes/thanksgiving.py` | Falling autumn leaves (maple, oak, aspen, and more) in fall colors |
 | 💕 Valentine's Day | `modes/valentines.py` | Hearts floating upward in pinks and reds |
+| 🎂 Birthday | `modes/birthday.py` | Cake, gift box, and falling confetti with personalized name banner |
 
 Each banner displays a centered holiday greeting with animated elements around the text.
 
 | | | |
 |:---:|:---:|:---:|
 | ![Clock](imgs/clock.png) | ![Weather](imgs/weather.png) | ![Subway Tracker](imgs/subwaytracker.png) |
-| Clock | Weather | Train Sign |
+| Clock | Weather | Subway |
 | ![Beach Day](imgs/beachday.png) | ![Christmas](imgs/christmas.png) | ![Halloween](imgs/halloween.png) |
 | Beach Day | Christmas | Halloween |
 | ![4th of July](imgs/4thofjuly.png) | ![New Year](imgs/newyear.png) | ![St. Patrick's Day](/imgs/stpaddys.png) |
@@ -217,6 +221,9 @@ The display automatically switches to the matching holiday mode on these days:
 | 4th Thursday of November | 🍂 Thanksgiving |
 | October 31 | 🎃 Halloween |
 | December 25 | 🎄 Christmas |
+| Configured dates | 🎂 Birthday |
+
+Birthdays are configured in `settings.toml` (see below). When today matches a birthday, the display shows a personalized "Happy Birthday [NAME]!" banner.
 
 This works on boot - if today is a holiday, the display starts in that mode instead of the last-used mode. The day after a holiday, the display automatically reverts to your saved default mode at midnight. You can always switch modes manually via the web UI at any time.
 
@@ -234,6 +241,7 @@ Tap any mode button to instantly switch. The **Settings** section (collapsible) 
 - **Train Stops** - station/line/direction for the train sign
 - **Zip Code** - sets weather location and auto-detects timezone for the clock
 - **Stock Symbols** - comma-separated tickers for stock mode (e.g. `AAPL,GOOGL,MSFT`)
+- **Birthdays** - name and date pairs for birthday auto-switch (e.g. `Jon:1-1,Emily:7-23`)
 
 > **Tip:** If `display.local` doesn't resolve, use the board's IP address (printed to the serial console on boot).
 

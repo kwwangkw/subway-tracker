@@ -198,6 +198,9 @@ def _load_mode_module(mode_name):
         elif mode_name == "beachday":
             from modes import beachday
             return beachday
+        elif mode_name == "birthday":
+            from modes import birthday
+            return birthday
         elif mode_name == "clock":
             from modes import clock
             return clock
@@ -222,6 +225,42 @@ def _clear_bitmap():
             bitmap[x, y] = 0
 
 
+def _fetch_tz_for_zip(zip_code):
+    """Quick timezone lookup for a US zip code via Open-Meteo.
+
+    Returns UTC offset in hours, or None on failure.
+    """
+    try:
+        import ssl
+        import adafruit_requests
+        ssl_ctx = ssl.create_default_context()
+        req = adafruit_requests.Session(pool, ssl_ctx)
+        # Geocode
+        url = f"https://geocoding-api.open-meteo.com/v1/search?name={zip_code}&count=1&language=en&format=json&country=US"
+        resp = req.get(url)
+        data = resp.json()
+        resp.close()
+        if "results" not in data or not data["results"]:
+            return None
+        lat = data["results"][0]["latitude"]
+        lon = data["results"][0]["longitude"]
+        # Fetch timezone
+        url2 = (f"https://api.open-meteo.com/v1/forecast?"
+                f"latitude={lat}&longitude={lon}"
+                f"&current=temperature_2m&timezone=auto&forecast_days=1")
+        resp2 = req.get(url2)
+        data2 = resp2.json()
+        resp2.close()
+        utc_off = data2.get("utc_offset_seconds")
+        if utc_off is not None:
+            tz = utc_off // 3600
+            print(f"Timezone for ZIP {zip_code}: UTC{tz:+d}")
+            return tz
+    except Exception as e:
+        print(f"Timezone fetch failed: {e}")
+    return None
+
+
 def _activate_mode(mode_name):
     """Load a mode module, clear display, call setup(). Returns module."""
     print(f"Activating mode: {mode_name}")
@@ -241,6 +280,9 @@ def _activate_mode(mode_name):
     # Train and weather modes need pool for HTTP; others don't
     if mode_name in ("train", "weather", "stocks"):
         mod.setup(bitmap, palette, pool=pool)
+    elif mode_name == "birthday":
+        bd_name = _get_birthday_name()
+        mod.setup(bitmap, palette, name=bd_name)
     else:
         mod.setup(bitmap, palette)
 
@@ -271,6 +313,42 @@ _detected_tz = None
 # ---------------------------------------------------------------
 # Holiday auto-detect
 # ---------------------------------------------------------------
+def _get_birthday_name():
+    """Check if today matches any configured birthday.
+
+    Parses BIRTHDAYS from web_server (Name:MM-DD,Name:MM-DD).
+    Returns the name if today is a match, or None.
+    """
+    try:
+        bd_str = web_server._birthdays
+        if not bd_str:
+            return None
+        now = time.localtime(time.time() + mta_feed.EPOCH_OFFSET)
+        month = now.tm_mon
+        day = now.tm_mday
+        for entry in bd_str.split(","):
+            entry = entry.strip()
+            if ":" not in entry:
+                continue
+            name, date_str = entry.split(":", 1)
+            name = name.strip()
+            date_str = date_str.strip()
+            if "-" not in date_str:
+                continue
+            parts = date_str.split("-")
+            if len(parts) == 2:
+                try:
+                    m = int(parts[0])
+                    d = int(parts[1])
+                    if m == month and d == day:
+                        return name
+                except ValueError:
+                    pass
+    except Exception as e:
+        print(f"Birthday check failed: {e}")
+    return None
+
+
 def _get_holiday_mode():
     """Check if today is a holiday and return the matching mode name.
 
@@ -280,6 +358,11 @@ def _get_holiday_mode():
         now = time.localtime(time.time() + mta_feed.EPOCH_OFFSET)
         month = now.tm_mon
         day = now.tm_mday
+
+        # Birthday check first
+        bd_name = _get_birthday_name()
+        if bd_name:
+            return "birthday"
 
         # Fixed-date holidays
         if month == 1 and day == 1:
@@ -328,7 +411,7 @@ current_module = _activate_mode(current_mode_name)
 
 # Holiday modes that can be auto-switched
 _HOLIDAY_MODES = {"newyear", "valentines", "stpatricks", "july4th",
-                  "halloween", "thanksgiving", "christmas"}
+                  "halloween", "thanksgiving", "christmas", "birthday"}
 
 # Track last checked day for holiday revert
 _last_holiday_check_day = -1
@@ -374,17 +457,35 @@ while True:
                 if current_mode_name == "train" and current_module is not None:
                     current_module.update_stops(s["stops"])
             if "zip" in s:
-                # Try to push to weather module if it's loaded
-                import sys
-                if "modes.weather" in sys.modules:
-                    sys.modules["modes.weather"].update_config(zip_code=s["zip"])
+                if current_mode_name == "weather" and current_module is not None:
+                    current_module.update_config(zip_code=s["zip"])
+                if current_mode_name == "clock" and current_module is not None:
+                    # Fetch timezone for the new zip via Open-Meteo
+                    _tz = _fetch_tz_for_zip(s["zip"])
+                    if _tz is not None:
+                        _detected_tz = _tz
+                        current_module.update_timezone(_tz)
             if "symbols" in s:
-                import sys
-                if "modes.stocks" in sys.modules:
-                    sys.modules["modes.stocks"].update_config(symbols=s["symbols"])
-                # If currently in stocks mode, update immediately
                 if current_mode_name == "stocks" and current_module is not None:
                     current_module.update_config(symbols=s["symbols"])
+            if "birthdays" in s:
+                # If currently in birthday mode, reactivate with new name
+                if current_mode_name == "birthday" and current_module is not None:
+                    bd_name = _get_birthday_name()
+                    if bd_name:
+                        current_module.setup(bitmap, palette, name=bd_name)
+                    else:
+                        # No birthday today anymore, revert
+                        saved = _load_mode()
+                        if saved not in _HOLIDAY_MODES:
+                            print(f"No birthday today, reverting to {saved}")
+                            import sys
+                            old_key = "modes.birthday"
+                            if old_key in sys.modules:
+                                del sys.modules[old_key]
+                            gc.collect()
+                            current_mode_name = saved
+                            current_module = _activate_mode(current_mode_name)
 
         # Handle mode switch
         new_mode = action.get("mode")
