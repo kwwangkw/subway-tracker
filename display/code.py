@@ -318,8 +318,11 @@ else:
 print(f"Boot mode: {current_mode_name}")
 current_module = _activate_mode(current_mode_name)
 
-# Track whether user manually switched mode (skip holiday auto-switch)
-_user_switched = False
+# Holiday modes that can be auto-switched
+_HOLIDAY_MODES = {"newyear", "valentines", "stpatricks", "july4th",
+                  "halloween", "thanksgiving", "christmas"}
+
+# Track last checked day for holiday revert
 _last_holiday_check_day = -1
 
 # ---------------------------------------------------------------
@@ -328,26 +331,25 @@ _last_holiday_check_day = -1
 while True:
     wdt.feed()
 
-    # Daily holiday check — auto-switch at midnight rollover
-    if not _user_switched:
-        try:
-            _now_t = time.localtime(time.time() + mta_feed.EPOCH_OFFSET)
-            _today = _now_t.tm_mday
-            if _today != _last_holiday_check_day:
-                _last_holiday_check_day = _today
-                _user_switched = False  # reset daily — give holiday a chance
-                _hm = _get_holiday_mode()
-                if _hm and _hm != current_mode_name:
-                    print(f"Holiday auto-switch: {current_mode_name} -> {_hm}")
+    # Daily check — if we're still on a holiday mode after the holiday, revert
+    try:
+        _now_t = time.localtime(time.time() + mta_feed.EPOCH_OFFSET)
+        _today = _now_t.tm_mday
+        if _today != _last_holiday_check_day:
+            _last_holiday_check_day = _today
+            if current_mode_name in _HOLIDAY_MODES and _get_holiday_mode() != current_mode_name:
+                saved = _load_mode()
+                if saved not in _HOLIDAY_MODES:
+                    print(f"Holiday over, reverting: {current_mode_name} -> {saved}")
                     import sys
                     old_key = f"modes.{current_mode_name}"
                     if old_key in sys.modules:
                         del sys.modules[old_key]
                     gc.collect()
-                    current_mode_name = _hm
+                    current_mode_name = saved
                     current_module = _activate_mode(current_mode_name)
-        except Exception:
-            pass
+    except Exception:
+        pass
 
     # Check for mode switch or stop change via HTTP
     action = web_server.poll(current_mode_name)
@@ -372,7 +374,6 @@ while True:
         new_mode = action.get("mode")
         if new_mode is not None and new_mode != current_mode_name:
             print(f"Mode switch: {current_mode_name} -> {new_mode}")
-            _user_switched = True  # user took control, skip holiday auto-switch
 
             # Unload old module from sys.modules to free RAM
             import sys
