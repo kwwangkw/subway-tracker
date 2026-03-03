@@ -309,9 +309,6 @@ def create_display_group(brightness=None):
     dr, dg, db = _dim(0x28, 0x28, 0x28, brightness)
     palette[COLOR_DIVIDER] = (dr << 16) | (dg << 8) | db
 
-    # Make black transparent = False (it's the background)
-    palette.make_transparent(COLOR_BLACK)
-
     tile_grid = displayio.TileGrid(bitmap, pixel_shader=palette)
     group = displayio.Group()
     group.append(tile_grid)

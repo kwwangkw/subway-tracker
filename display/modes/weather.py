@@ -445,10 +445,22 @@ def animate(bitmap):
         lo_str = f"L:{int(round(_temp_low))}"
         _draw_small_text(right_x, 12, lo_str, 7)
 
-    # --- Bottom: location - conditions text ---
+    # --- Bottom: time - conditions text ---
     condition = WMO_CODES.get(_weather_code, "Unknown")
-    loc_str = _location.upper()
-    bottom_str = f"{loc_str} - {condition.upper()}"
+
+    # Build 12-hour time string
+    now_unix = time.time() + EPOCH_OFFSET
+    tz = _tz_offset if _tz_offset is not None else int(os.getenv("CLOCK_TZ_OFFSET", "-5"))
+    local = now_unix + tz * 3600
+    hh = int(local // 3600) % 24
+    mm = int(local // 60) % 60
+    ampm = "AM" if hh < 12 else "PM"
+    h12 = hh % 12
+    if h12 == 0:
+        h12 = 12
+    time_str = f"{h12}:{mm:02d}{ampm}"
+
+    bottom_str = f"{time_str} - {condition.upper()}"
     bottom_w = _measure_text(bottom_str)
 
     # Fall back to just condition if too wide

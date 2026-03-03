@@ -38,3 +38,7 @@ CLOCK_TZ_OFFSET = "-5"
 # ----- Weather Mode -----
 # US zip code — sets weather location and auto-detects timezone
 WEATHER_ZIP = "10001"
+
+# ----- Stocks Mode -----
+# Comma-separated ticker symbols
+STOCK_SYMBOLS = "AAPL,GOOGL,MSFT"

@@ -19,6 +19,7 @@ MODES = [
     ("train", "🚇 Train Sign"),
     ("clock", "🕐 Clock"),
     ("weather", "🌤️ Weather"),
+    ("stocks", "📈 Stocks"),
     ("halloween", "🎃 Halloween"),
     ("christmas", "🎄 Christmas"),
     ("thanksgiving", "🦃 Thanksgiving"),
@@ -35,12 +36,13 @@ _pending_stops = None  # set by poll(), consumed by code.py
 
 # Clock/weather settings — initialized from settings.toml, changeable via web
 _zip_code = "10001"
+_stock_symbols = "AAPL,GOOGL,MSFT"
 
 
 def start(pool, port=80):
     """Start the HTTP server on the given port. Returns True if successful."""
     global _server_socket, _pool, _mdns_server, _stops_config
-    global _zip_code
+    global _zip_code, _stock_symbols
     _pool = pool
 
     # Initialize stops from settings.toml
@@ -49,6 +51,9 @@ def start(pool, port=80):
 
     # Initialize weather zip from settings.toml
     _zip_code = os.getenv("WEATHER_ZIP", "10001")
+
+    # Initialize stock symbols from settings.toml
+    _stock_symbols = os.getenv("STOCK_SYMBOLS", "AAPL,GOOGL,MSFT")
 
     # Set up mDNS so http://display.local works
     try:
@@ -113,7 +118,7 @@ def poll(current_mode):
                 else:
                     _send_response(client, 404, "Not Found",
                                    body="Unknown mode")
-            elif path in ("/stops", "/settings") and method == "POST":
+            elif path == "/settings" and method == "POST":
                 # Get the body — may need a second recv if headers were long
                 body = ""
                 if "\r\n\r\n" in request:
@@ -126,16 +131,9 @@ def poll(current_mode):
                             body = buf2[:s2].decode("utf-8")
                     except Exception:
                         pass
-                if path == "/stops":
-                    new_stops = _parse_stops_form(body)
-                    if new_stops:
-                        _stops_config[:] = new_stops
-                        result = {"stops": list(new_stops)}
-                        print(f"Stops updated: {new_stops}")
-                else:
-                    settings = _parse_settings_form(body)
-                    if settings:
-                        result = {"settings": settings}
+                settings = _parse_settings_form(body)
+                if settings:
+                    result = {"settings": settings}
                 _send_response(client, 303, "See Other",
                                headers="Location: /\r\n")
             else:
@@ -156,62 +154,60 @@ def poll(current_mode):
     return result
 
 
-def _parse_stops_form(body):
-    """Parse URL-encoded form body for the stops field.
-
-    Returns list of non-empty stop config strings, or None if invalid.
-    """
-    # Extract the stops= value from the form body
-    raw = ""
-    for pair in body.split("&"):
-        if pair.startswith("stops="):
-            raw = pair[6:]
-            break
-
-    # URL-decode: + → space, %XX → char
-    raw = raw.replace("+", " ")
-    i = 0
-    decoded = []
-    while i < len(raw):
-        if raw[i] == "%" and i + 2 < len(raw):
-            try:
-                decoded.append(chr(int(raw[i+1:i+3], 16)))
-                i += 3
-                continue
-            except ValueError:
-                pass
-        decoded.append(raw[i])
-        i += 1
-    raw = "".join(decoded).strip().upper()
-
-    # Split on commas, validate each entry has at least a stop ID
-    new_stops = []
-    for entry in raw.split(","):
-        entry = entry.strip()
-        if entry and entry.split(":")[0]:
-            new_stops.append(entry)
-
-    return new_stops if new_stops else None
-
-
 def _parse_settings_form(body):
-    """Parse URL-encoded form body for zip code.
+    """Parse URL-encoded form body for all settings.
 
     Returns dict with changed values, or None.
     """
-    global _zip_code
+    global _zip_code, _stock_symbols
     fields = {}
     for pair in body.split("&"):
         if "=" in pair:
             k, v = pair.split("=", 1)
-            fields[k] = v.replace("+", " ").strip()
+            # URL-decode: + -> space, %XX -> char
+            v = v.replace("+", " ")
+            i = 0
+            decoded = []
+            while i < len(v):
+                if v[i] == "%" and i + 2 < len(v):
+                    try:
+                        decoded.append(chr(int(v[i+1:i+3], 16)))
+                        i += 3
+                        continue
+                    except ValueError:
+                        pass
+                decoded.append(v[i])
+                i += 1
+            fields[k] = "".join(decoded).strip()
 
     changed = {}
+
+    # Stops
+    if "stops" in fields:
+        raw = fields["stops"].upper()
+        new_stops = []
+        for entry in raw.split(","):
+            entry = entry.strip()
+            if entry and entry.split(":")[0]:
+                new_stops.append(entry)
+        if new_stops and new_stops != _stops_config:
+            _stops_config[:] = new_stops
+            changed["stops"] = list(new_stops)
+            print(f"Stops updated: {new_stops}")
+
+    # Zip code
     if "zip" in fields and fields["zip"]:
         new_zip = fields["zip"]
         if new_zip != _zip_code:
             _zip_code = new_zip
             changed["zip"] = new_zip
+
+    # Stock symbols
+    if "symbols" in fields and fields["symbols"]:
+        new_sym = fields["symbols"].upper().replace(" ", "")
+        if new_sym != _stock_symbols:
+            _stock_symbols = new_sym
+            changed["symbols"] = new_sym
 
     if changed:
         print(f"Settings updated: {changed}")
@@ -285,6 +281,13 @@ _CSS = (
     "color:#8af;border:1px solid #2a4a7a;border-radius:10px;font-size:1em;"
     "cursor:pointer}"
     ".sb:active{background:#2a3a5a}"
+    "details{margin-top:16px;border-top:1px solid #333;padding-top:12px}"
+    "summary{color:#aaa;font-size:1em;cursor:pointer;padding:8px 0;"
+    "list-style:none;display:flex;align-items:center;gap:6px}"
+    "summary::-webkit-details-marker{display:none}"
+    "summary::before{content:'\\25b6';font-size:.7em;transition:transform .2s}"
+    "details[open] summary::before{transform:rotate(90deg)}"
+    "details .inner{padding-top:8px}"
     "</style>"
 )
 
@@ -292,6 +295,7 @@ _LABELS = {
     "train": "Train Sign",
     "clock": "Clock",
     "weather": "Weather",
+    "stocks": "Stocks",
     "halloween": "Halloween",
     "christmas": "Christmas",
     "thanksgiving": "Thanksgiving",
@@ -320,29 +324,6 @@ def _send_page(client, current_mode):
     parts.append(ip)
     parts.append("</div>")
 
-    # --- Station config form ---
-    parts.append("<h2>Stations</h2>")
-    parts.append('<form method="POST" action="/stops">')
-    stops_val = ",".join(_stops_config)
-    parts.append('<div class="row"><label>Stops</label>')
-    parts.append('<input name="stops" value="')
-    parts.append(stops_val)
-    parts.append('" placeholder="721:7:N,G24:G:S"></div>')
-    parts.append('<div class="hint">STOP:LINE:DIR comma-separated — nearest 2 arrivals shown</div>')
-    parts.append('<button type="submit" class="sb">Update Stations</button>')
-    parts.append("</form>")
-
-    # --- Clock/Weather settings form ---
-    parts.append("<h2>Settings</h2>")
-    parts.append('<form method="POST" action="/settings">')
-    parts.append('<div class="row"><label>Zip Code</label>')
-    parts.append('<input name="zip" value="')
-    parts.append(_zip_code)
-    parts.append('" placeholder="10001"></div>')
-    parts.append('<div class="hint">Sets weather location and auto-detects timezone for clock</div>')
-    parts.append('<button type="submit" class="sb">Update Settings</button>')
-    parts.append("</form>")
-
     # --- Mode buttons ---
     parts.append("<h2>Mode</h2>")
 
@@ -358,6 +339,39 @@ def _send_page(client, current_mode):
             parts.append('">')
             parts.append(lbl)
             parts.append("</a>")
+
+    # --- Collapsible settings ---
+    parts.append("<details>")
+    parts.append("<summary>Settings</summary>")
+    parts.append('<div class="inner">')
+    parts.append('<form method="POST" action="/settings">')
+
+    # Stations
+    stops_val = ",".join(_stops_config)
+    parts.append('<div class="row"><label>Train Stops</label>')
+    parts.append('<input name="stops" value="')
+    parts.append(stops_val)
+    parts.append('" placeholder="721:7:N,G24:G:S"></div>')
+    parts.append('<div class="hint">STOP:LINE:DIR comma-separated</div>')
+
+    # Zip code
+    parts.append('<div class="row"><label>Zip Code</label>')
+    parts.append('<input name="zip" value="')
+    parts.append(_zip_code)
+    parts.append('" placeholder="10001"></div>')
+    parts.append('<div class="hint">Weather location &amp; clock timezone</div>')
+
+    # Stock symbols
+    parts.append('<div class="row"><label>Stock Symbols</label>')
+    parts.append('<input name="symbols" value="')
+    parts.append(_stock_symbols)
+    parts.append('" placeholder="AAPL,GOOGL,MSFT"></div>')
+    parts.append('<div class="hint">Comma-separated ticker symbols</div>')
+
+    parts.append('<button type="submit" class="sb">Save</button>')
+    parts.append("</form>")
+    parts.append("</div>")
+    parts.append("</details>")
 
     parts.append("</body></html>")
     body = "".join(parts)
