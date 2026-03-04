@@ -313,6 +313,28 @@ _detected_tz = None
 # ---------------------------------------------------------------
 # Holiday auto-detect
 # ---------------------------------------------------------------
+def _unix_to_date(unix_ts):
+    """Convert Unix timestamp to local (year, month, day) using timezone."""
+    tz = _detected_tz if _detected_tz is not None else int(os.getenv("CLOCK_TZ_OFFSET", "-5"))
+    ts = unix_ts + tz * 3600
+    days = ts // 86400
+    y = 1970
+    while True:
+        leap = (y % 4 == 0 and y % 100 != 0) or (y % 400 == 0)
+        diy = 366 if leap else 365
+        if days < diy:
+            break
+        days -= diy
+        y += 1
+    leap = (y % 4 == 0 and y % 100 != 0) or (y % 400 == 0)
+    mdays = [31, 29 if leap else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    m = 0
+    while m < 12 and days >= mdays[m]:
+        days -= mdays[m]
+        m += 1
+    return y, m + 1, days + 1
+
+
 def _get_birthday_name():
     """Check if today matches any configured birthday.
 
@@ -323,9 +345,8 @@ def _get_birthday_name():
         bd_str = web_server._birthdays
         if not bd_str:
             return None
-        now = time.localtime(time.time() + mta_feed.EPOCH_OFFSET)
-        month = now.tm_mon
-        day = now.tm_mday
+        now_unix = time.time() + mta_feed.EPOCH_OFFSET
+        _, month, day = _unix_to_date(now_unix)
         for entry in bd_str.split(","):
             entry = entry.strip()
             if ":" not in entry:
@@ -355,9 +376,8 @@ def _get_holiday_mode():
     Uses NTP-synced time. Returns None if not a holiday.
     """
     try:
-        now = time.localtime(time.time() + mta_feed.EPOCH_OFFSET)
-        month = now.tm_mon
-        day = now.tm_mday
+        now_unix = time.time() + mta_feed.EPOCH_OFFSET
+        year, month, day = _unix_to_date(now_unix)
 
         # Birthday check first
         bd_name = _get_birthday_name()
@@ -380,17 +400,26 @@ def _get_holiday_mode():
 
         # Thanksgiving - 4th Thursday of November
         if month == 11:
-            # Find the 4th Thursday: weekday 3 (Mon=0)
-            # tm_wday: 0=Monday ... 6=Sunday
-            # Count Thursdays up to today
-            count = 0
-            for d in range(1, day + 1):
-                # day-of-week for Nov d: shift from day 1's weekday
-                t = time.localtime(time.mktime((now.tm_year, 11, d, 0, 0, 0, 0, 0, -1)))
-                if t.tm_wday == 3:  # Thursday
-                    count += 1
-                    if count == 4 and d == day:
-                        return "thanksgiving"
+            # Weekday of Nov 1 using days since Unix epoch
+            # Jan 1 1970 = Thursday (3), 0=Mon..6=Sun
+            mdays = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+            leap = (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0)
+            if leap:
+                mdays[1] = 29
+            d_since = 0
+            for y in range(1970, year):
+                lp = (y % 4 == 0 and y % 100 != 0) or (y % 400 == 0)
+                d_since += 366 if lp else 365
+            for mi in range(10):  # Jan..Oct
+                d_since += mdays[mi]
+            # d_since is now days from epoch to Nov 1
+            nov1_wday = (d_since + 3) % 7  # 0=Mon..6=Sun, Thu=3
+            # Find 4th Thursday
+            # First Thursday: if nov1 is Thu(3), it's day 1; else offset
+            first_thu = (3 - nov1_wday) % 7 + 1  # day of month
+            fourth_thu = first_thu + 21
+            if day == fourth_thu:
+                return "thanksgiving"
     except Exception as e:
         print(f"Holiday check failed: {e}")
     return None
@@ -428,8 +457,8 @@ while True:
 
     # Daily check - if we're still on a holiday mode after the holiday, revert
     try:
-        _now_t = time.localtime(time.time() + mta_feed.EPOCH_OFFSET)
-        _today = _now_t.tm_mday
+        _now_unix = time.time() + mta_feed.EPOCH_OFFSET
+        _, _, _today = _unix_to_date(_now_unix)
         if _today != _last_holiday_check_day:
             _last_holiday_check_day = _today
             if current_mode_name in _HOLIDAY_MODES and _get_holiday_mode() != current_mode_name:
