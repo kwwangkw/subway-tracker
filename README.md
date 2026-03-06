@@ -45,14 +45,31 @@ Copy these files to the **root** of your `CIRCUITPY` drive:
 
 ```
 CIRCUITPY/
+├── boot.py              # Power-up delay for stable boot
 ├── code.py              # Main entry point (runs on boot)
-├── font_data.py         # Bitmap font definitions & line colors
-├── mta_feed.py          # MTA GTFS-RT feed parser
-├── train_sign.py        # Display rendering engine
+├── web_server.py        # Built-in HTTP server for mode switching & settings
 ├── settings.toml        # Wi-Fi credentials & station config
-└── lib/
-    ├── adafruit_requests.mpy
-    └── adafruit_connection_manager.mpy
+├── lib/
+│   ├── adafruit_requests.mpy
+│   ├── adafruit_connection_manager.mpy
+│   ├── font_data.py     # Bitmap font definitions & line colors
+│   ├── mta_feed.py      # MTA GTFS-RT feed parser
+│   └── train_sign.py    # Display rendering engine
+└── modes/
+    ├── __init__.py
+    ├── train.py         # 🚇 Subway arrivals
+    ├── clock.py         # 🕐 Digital clock
+    ├── weather.py       # 🌤️ Weather display
+    ├── stocks.py        # 📈 Stock ticker
+    ├── birthday.py      # 🎂 Birthday banner
+    ├── beachday.py      # 🏖️ Beach day
+    ├── christmas.py     # 🎄 Christmas
+    ├── halloween.py     # 🎃 Halloween
+    ├── july4th.py       # 🇺🇸 4th of July
+    ├── newyear.py       # 🎆 New Year
+    ├── stpatricks.py    # ☘️ St. Patrick's Day
+    ├── thanksgiving.py  # 🍂 Thanksgiving
+    └── valentines.py    # 💕 Valentine's Day
 ```
 
 ### 4. Configure
@@ -152,13 +169,21 @@ Check the [MTA map](https://map.mta.info/) if you're unsure which direction you 
 
 ```
 code.py (main loop)
-  ├── Connects to Wi-Fi
-  ├── Fetches MTA GTFS-RT protobuf feeds (no API key needed)
-  │   └── mta_feed.py parses raw protobuf to extract arrivals
+  ├── Connects to Wi-Fi & syncs time via NTP
+  ├── web_server.py starts HTTP server on port 80
+  │   ├── Loads settings from NVM (persisted) or settings.toml (defaults)
+  │   └── Serves mode picker & settings UI at http://display.local
+  ├── Holiday auto-detect (switches mode on holidays/birthdays)
+  ├── Loads active mode from modes/*.py
+  │   ├── train.py fetches MTA GTFS-RT protobuf feeds (no API key)
+  │   │   └── mta_feed.py parses raw protobuf to extract arrivals
+  │   ├── weather.py fetches from Open-Meteo API
+  │   ├── stocks.py fetches from Yahoo Finance
+  │   └── Holiday modes run standalone animations
   ├── Renders display using bitmap fonts
   │   └── train_sign.py draws circles, text, times
   │       └── font_data.py provides 5×7 and 5×5 bitmap glyphs
-  └── Refreshes every 30 seconds
+  └── Polls web server for mode/settings changes each loop
 ```
 
 ### Display Layout (128×32)
@@ -178,7 +203,7 @@ Each row shows:
 
 ## Display Modes
 
-The display includes a clock, weather display, and 9 animated holiday modes - all switchable instantly via the [web interface](#mode-switching-via-web-interface). No file swapping or reboot needed - just tap a button.
+The display includes a clock, weather display, and 10 animated holiday modes - all switchable instantly via the [web interface](#mode-switching-via-web-interface). No file swapping or reboot needed - just tap a button.
 
 | Mode | Mode File | Description |
 |------|-----------|-------------|
@@ -243,19 +268,13 @@ Tap any mode button to instantly switch. The **Settings** section (collapsible) 
 - **Stock Symbols** - comma-separated tickers for stock mode (e.g. `AAPL,GOOGL,MSFT`)
 - **Birthdays** - name and date pairs for birthday auto-switch (e.g. `Jon:1-1,Emily:7-23`)
 
+All settings changes (including mode switches) are **saved automatically** and persist across reboots. Settings are stored in the ESP32-S3's non-volatile memory (NVM), so they survive power cycles without needing filesystem write access. The values in `settings.toml` serve as factory defaults — any changes made via the web UI override them until NVM is cleared.
+
 > **Tip:** If `display.local` doesn't resolve, use the board's IP address (printed to the serial console on boot).
 
 ### Loading Screen
 
 Shown briefly on boot while connecting to Wi-Fi and fetching the first batch of arrivals.
-
-## Development
-
-The `TrainSign.ipynb` notebook is a Pillow-based mock of the LED display for prototyping the layout without hardware. Run it to preview what the display looks like.
-
-The `TrainSign/test/` folder contains standalone test files that run on the hardware without Wi-Fi:
-- `code.py` - scrolling display test with sample data
-- `no_wifi_screen.py` - preview of the "No WiFi" error screen
 
 ## Debugging via Serial Console
 
@@ -281,10 +300,14 @@ Replace `*` with the full device name if multiple USB devices are connected.
 
 ```
 Connecting to WiFi...
-WiFi connected!
-Fetching arrivals...
-Row 0: 7 → 34 St-Hudson Yards  3min
-Row 1: G → Church Av           8min
+Connected! IP: 192.168.4.63
+Syncing time via NTP...
+Time synced! offset=826085247
+mDNS: http://display.local
+HTTP server on port 80
+NVM overrides: ['mode', 'stops', 'zip', 'symbols', 'birthdays']
+Boot mode: train
+Activating mode: train
 ```
 
 ### 4. Disconnect

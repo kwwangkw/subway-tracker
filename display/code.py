@@ -146,22 +146,14 @@ gc.collect()
 # Mode persistence
 # ---------------------------------------------------------------
 def _load_mode():
-    try:
-        with open(MODE_FILE, "r") as f:
-            mode = f.read().strip()
-            if mode:
-                return mode
-    except Exception:
-        pass
+    saved = web_server.load_mode()
+    if saved:
+        return saved
     return DEFAULT_MODE
 
 
 def _save_mode(mode):
-    try:
-        with open(MODE_FILE, "w") as f:
-            f.write(mode)
-    except Exception as e:
-        print(f"Could not save mode: {e}")
+    web_server.save_mode(mode)
 
 
 # ---------------------------------------------------------------

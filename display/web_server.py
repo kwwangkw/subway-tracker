@@ -10,6 +10,7 @@ import mdns
 import wifi
 import os
 import gc
+import microcontroller
 
 _server_socket = None
 _pool = None
@@ -45,6 +46,71 @@ _pending_stops = None  # set by poll(), consumed by code.py
 _zip_code = "10001"
 _stock_symbols = "AAPL,GOOGL,MSFT"
 _birthdays = ""  # Name:MM-DD,Name:MM-DD
+_mode = "train"  # current mode, persisted via NVM
+
+
+# ---------------------------------------------------------------
+# NVM persistence - stores settings in microcontroller.nvm
+# Format: "key1=val1\nkey2=val2\n" with a null terminator
+# Keys: stops, zip, symbols, birthdays
+# ---------------------------------------------------------------
+_NVM_MARKER = b"SS"  # 2-byte marker to identify valid NVM data
+
+
+def _load_nvm():
+    """Load saved settings from NVM. Returns dict of key->value, or {}."""
+    try:
+        nvm = microcontroller.nvm
+        if nvm[0:2] != _NVM_MARKER:
+            return {}
+        # Find null terminator
+        end = 2
+        while end < len(nvm) and nvm[end] != 0:
+            end += 1
+        raw = bytes(nvm[2:end]).decode("utf-8")
+        result = {}
+        for line in raw.split("\n"):
+            if "=" in line:
+                k, v = line.split("=", 1)
+                result[k] = v
+        return result
+    except Exception as e:
+        print(f"NVM load error: {e}")
+        return {}
+
+
+def _save_nvm():
+    """Save current settings to NVM."""
+    try:
+        data = (
+            f"mode={_mode}\n"
+            f"stops={','.join(_stops_config)}\n"
+            f"zip={_zip_code}\n"
+            f"symbols={_stock_symbols}\n"
+            f"birthdays={_birthdays}\n"
+        )
+        raw = _NVM_MARKER + data.encode("utf-8") + b"\x00"
+        nvm = microcontroller.nvm
+        if len(raw) > len(nvm):
+            print(f"NVM save error: data too large ({len(raw)}/{len(nvm)})")
+            return
+        nvm[0:len(raw)] = raw
+        print(f"Settings saved to NVM ({len(raw)} bytes)")
+    except Exception as e:
+        print(f"NVM save error: {e}")
+
+
+def save_mode(mode):
+    """Save the current mode to NVM."""
+    global _mode
+    _mode = mode
+    _save_nvm()
+
+
+def load_mode():
+    """Load saved mode. Returns mode name from NVM, or None."""
+    saved = _load_nvm()
+    return saved.get("mode")
 
 
 def start(pool, port=80):
@@ -53,18 +119,27 @@ def start(pool, port=80):
     global _zip_code, _stock_symbols, _birthdays
     _pool = pool
 
-    # Initialize stops from settings.toml
+    # Initialize from settings.toml (defaults)
     stops_str = os.getenv("MTA_STOPS", "")
     _stops_config[:] = [s.strip() for s in stops_str.split(",") if s.strip()]
-
-    # Initialize weather zip from settings.toml
     _zip_code = os.getenv("WEATHER_ZIP", "10001")
-
-    # Initialize stock symbols from settings.toml
     _stock_symbols = os.getenv("STOCK_SYMBOLS", "AAPL,GOOGL,MSFT")
-
-    # Initialize birthdays from settings.toml
     _birthdays = os.getenv("BIRTHDAYS", "")
+
+    # Override with NVM-saved settings (if any)
+    saved = _load_nvm()
+    if saved:
+        print(f"NVM overrides: {list(saved.keys())}")
+        if "mode" in saved and saved["mode"]:
+            _mode = saved["mode"]
+        if "stops" in saved and saved["stops"]:
+            _stops_config[:] = [s.strip() for s in saved["stops"].split(",") if s.strip()]
+        if "zip" in saved and saved["zip"]:
+            _zip_code = saved["zip"]
+        if "symbols" in saved and saved["symbols"]:
+            _stock_symbols = saved["symbols"]
+        if "birthdays" in saved:
+            _birthdays = saved["birthdays"]
 
     # Set up mDNS so http://display.local works
     try:
@@ -229,6 +304,7 @@ def _parse_settings_form(body):
 
     if changed:
         print(f"Settings updated: {changed}")
+        _save_nvm()
         return changed
     return None
 
