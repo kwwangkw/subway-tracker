@@ -481,8 +481,25 @@ def needs_scroll(direction):
     return dir_w + SCROLL_PAD
 
 
-def draw_loading_screen(bitmap, palette):
-    """Draw a centered 'NYC SUBWAY / LOADING...' message on startup."""
+_MODE_TITLES = {
+    "train": "NYC SUBWAY",
+    "clock": "CLOCK",
+    "weather": "WEATHER",
+    "stocks": "STOCKS",
+    "christmas": "CHRISTMAS",
+    "halloween": "HALLOWEEN",
+    "july4th": "4TH OF JULY",
+    "newyear": "NEW YEAR",
+    "stpatricks": "ST PATRICKS",
+    "thanksgiving": "THANKSGIVING",
+    "valentines": "VALENTINES",
+    "beachday": "BEACH DAY",
+    "birthday": "BIRTHDAY",
+}
+
+
+def draw_loading_screen(bitmap, palette, mode=None):
+    """Draw a centered loading message on startup."""
     _clear_bitmap(bitmap)
 
     line_h = 7
@@ -490,7 +507,7 @@ def draw_loading_screen(bitmap, palette):
     total_h = line_h * 2 + gap
     top_y = (HEIGHT - total_h) // 2
 
-    l1 = "NYC SUBWAY"
+    l1 = _MODE_TITLES.get(mode, "NYC SUBWAY") if mode else "NYC SUBWAY"
     l2 = "LOADING..."  # Center with all 3 dots so it looks balanced
     l1_x = (WIDTH - _measure_text(l1)) // 2
     l2_x = (WIDTH - _measure_text(l2)) // 2

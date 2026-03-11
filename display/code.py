@@ -69,7 +69,25 @@ display = framebufferio.FramebufferDisplay(matrix, auto_refresh=True)
 group, bitmap, palette = create_display_group(brightness=BRIGHTNESS)
 display.root_group = group
 
-draw_loading_screen(bitmap, palette)
+# Peek at saved mode from NVM before WiFi (no network needed)
+def _peek_nvm_mode():
+    try:
+        nvm = microcontroller.nvm
+        if nvm[0:2] != b"SS":
+            return None
+        end = 2
+        while end < len(nvm) and nvm[end] != 0:
+            end += 1
+        raw = bytes(nvm[2:end]).decode("utf-8")
+        for line in raw.split("\n"):
+            if line.startswith("mode="):
+                return line[5:]
+    except Exception:
+        pass
+    return None
+
+_boot_mode = _peek_nvm_mode() or DEFAULT_MODE
+draw_loading_screen(bitmap, palette, mode=_boot_mode)
 
 # ---------------------------------------------------------------
 # Watchdog - auto-reboot if code hangs for > 30 seconds
