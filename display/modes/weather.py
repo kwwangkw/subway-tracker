@@ -34,12 +34,22 @@ _last_minute = -1  # track displayed minute for time updates
 _time_only_update = False  # True when only the clock changed, not weather data
 _prev_bottom_str = None  # previously drawn bottom text for incremental clear
 _prev_bottom_x = 0
+_prev_time_only = None   # previously drawn time_only text (when bottom bar is too wide)
+_prev_time_only_x = 0
 _lat = None
 _lon = None
 _location = ""
 _fetch_error = False
 _tz_offset = None      # auto-detected from API (hours)
 _is_day = True         # day/night from API
+
+# --- Previous-draw state for incremental redraw ---
+_drawn_temp_str = None   # e.g. "37"
+_drawn_temp_end_x = 0    # x after last large digit (for degree/F)
+_drawn_icon_key = None   # (icon_id, icon_color) tuple
+_drawn_hi_str = None
+_drawn_lo_str = None
+_drawn_loading = False   # True if loading screen is currently shown
 
 # WMO weather codes -> description and icon type
 WMO_CODES = {
@@ -232,26 +242,73 @@ def _draw_icon(x, y, icon, color):
                 _set_pixel(x + col_i, y + row_i, color)
 
 
+def _large_char_width(ch):
+    """Return the pixel width of a single large (2x) character."""
+    from font_data import FONT_5x7
+    glyph = FONT_5x7.get(ch, FONT_5x7.get(" "))
+    if glyph is None:
+        return 6
+    return len(glyph) * 2 + 2
+
+
+def _measure_large_text(text):
+    """Measure total width of large (2x) text."""
+    return sum(_large_char_width(ch) for ch in text)
+
+
+def _draw_large_char(x, y, ch, color):
+    """Draw one large (2x) character at (x, y). Returns width consumed."""
+    from font_data import FONT_5x7
+    glyph = FONT_5x7.get(ch, FONT_5x7.get(" "))
+    if glyph is None:
+        return 6
+    w = len(glyph)
+    for col_i in range(w):
+        col_byte = glyph[col_i]
+        for row_i in range(7):
+            if col_byte & (1 << row_i):
+                _set_pixel(x + col_i * 2, y + row_i * 2, color)
+                _set_pixel(x + col_i * 2 + 1, y + row_i * 2, color)
+                _set_pixel(x + col_i * 2, y + row_i * 2 + 1, color)
+                _set_pixel(x + col_i * 2 + 1, y + row_i * 2 + 1, color)
+    return w * 2 + 2
+
+
 def _draw_large_temp(x, y, temp_str, color):
     """Draw temperature in large 5x7 font, double-height."""
-    from font_data import FONT_5x7
     for ch in temp_str:
-        glyph = FONT_5x7.get(ch, FONT_5x7.get(" "))
-        if glyph is None:
-            x += 6
-            continue
-        w = len(glyph)
-        for col_i in range(w):
-            col_byte = glyph[col_i]
-            for row_i in range(7):
-                if col_byte & (1 << row_i):
-                    # Draw 2x2 pixel blocks
-                    _set_pixel(x + col_i * 2, y + row_i * 2, color)
-                    _set_pixel(x + col_i * 2 + 1, y + row_i * 2, color)
-                    _set_pixel(x + col_i * 2, y + row_i * 2 + 1, color)
-                    _set_pixel(x + col_i * 2 + 1, y + row_i * 2 + 1, color)
-        x += w * 2 + 2
+        x += _draw_large_char(x, y, ch, color)
     return x
+
+
+def _get_icon_key(code, is_day):
+    """Return a comparable key (icon_id, color_index) for the current weather icon."""
+    if code is None:
+        icon_id = "cloud"
+    elif code <= 1:
+        icon_id = "sun" if is_day else "moon"
+    elif code <= 3:
+        icon_id = "cloud"
+    elif code <= 48:
+        icon_id = "fog"
+    elif code <= 57:
+        icon_id = "drizzle"
+    elif code <= 67:
+        icon_id = "rain"
+    elif code <= 77:
+        icon_id = "snow"
+    elif code <= 82:
+        icon_id = "showers"
+    elif code <= 86:
+        icon_id = "snowshowers"
+    else:
+        icon_id = "thunder"
+    # Determine color
+    if code is not None and code <= 1:
+        color = 4 if is_day else 7
+    else:
+        color = COLOR_WHITE
+    return (icon_id, color)
 
 
 def _geocode_zip(requests_session, zip_code):
@@ -344,6 +401,9 @@ def setup(bitmap, palette, pool=None, **kwargs):
     global _temperature, _temp_high, _temp_low, _weather_code
     global _lat, _lon, _location, _fetch_error, _needs_redraw
     global _last_minute, _time_only_update, _prev_bottom_str, _prev_bottom_x
+    global _prev_time_only, _prev_time_only_x
+    global _drawn_temp_str, _drawn_temp_end_x, _drawn_icon_key
+    global _drawn_hi_str, _drawn_lo_str, _drawn_loading
 
     _bitmap = bitmap
     _palette = palette
@@ -361,6 +421,14 @@ def setup(bitmap, palette, pool=None, **kwargs):
     _time_only_update = False
     _prev_bottom_str = None
     _prev_bottom_x = 0
+    _prev_time_only = None
+    _prev_time_only_x = 0
+    _drawn_temp_str = None
+    _drawn_temp_end_x = 0
+    _drawn_icon_key = None
+    _drawn_hi_str = None
+    _drawn_lo_str = None
+    _drawn_loading = False
 
     # Set up colors
     palette[COLOR_BLACK] = 0x000000
@@ -427,28 +495,64 @@ def _build_bottom_text():
 def _draw_bottom_text():
     """Draw the bottom time/condition bar, clearing old text first."""
     global _prev_bottom_str, _prev_bottom_x
+    global _prev_time_only, _prev_time_only_x
     bottom_str, bottom_w, time_only = _build_bottom_text()
     bottom_y = 24
     bottom_x = (WIDTH - bottom_w) // 2
-    # Clear previous bottom text area
-    if _prev_bottom_str is not None:
-        prev_w = _measure_text(_prev_bottom_str)
-        _clear_rect(_prev_bottom_x, bottom_y, prev_w, 7)
-    _draw_small_text(bottom_x, bottom_y, bottom_str, 5)
-    _prev_bottom_str = bottom_str
-    _prev_bottom_x = bottom_x
-    # If time_only is not None, draw the time under the temp/icon
+
+    bottom_changed = bottom_str != _prev_bottom_str or bottom_x != _prev_bottom_x
+    time_changed = time_only != _prev_time_only
+
+    if not bottom_changed and not time_changed:
+        return  # nothing changed
+
+    # Redraw main bottom bar if changed
+    if bottom_changed:
+        if _prev_bottom_str is not None:
+            prev_w = _measure_text(_prev_bottom_str)
+            _clear_rect(_prev_bottom_x, bottom_y, prev_w, 7)
+        _draw_small_text(bottom_x, bottom_y, bottom_str, 5)
+        _prev_bottom_str = bottom_str
+        _prev_bottom_x = bottom_x
+
+    # Handle separate time text (when condition is too wide for combined string)
     if time_only is not None:
-        # Left-align under temp/icon (y=18)
-        time_x = 12  # same as icon left edge
-        time_w = _measure_text(time_only)
-        _clear_rect(time_x, 15, time_w, 7)
-        _draw_small_text(time_x, 15, time_only, 5)
+        if time_changed:
+            time_x = 12  # same as icon left edge
+            # Clear previous time using OLD width
+            if _prev_time_only is not None:
+                old_time_w = _measure_text(_prev_time_only)
+                _clear_rect(_prev_time_only_x, 15, old_time_w, 7)
+            _draw_small_text(time_x, 15, time_only, 5)
+            _prev_time_only = time_only
+            _prev_time_only_x = time_x
+    elif _prev_time_only is not None:
+        # Condition shortened enough to fit — clear leftover time text
+        old_time_w = _measure_text(_prev_time_only)
+        _clear_rect(_prev_time_only_x, 15, old_time_w, 7)
+        _prev_time_only = None
+        _prev_time_only_x = 0
+
+
+# Layout constants
+_ICON_X = 12
+_ICON_Y = 3
+_ICON_W = 12
+_ICON_H = 10
+_TEMP_X = 28
+_TEMP_Y = 3
+_TEMP_LARGE_H = 14  # 7 rows * 2
+_HILO_X = 90
+_HI_Y = 3
+_LO_Y = 12
 
 
 def animate(bitmap):
     """Update weather display. Returns sleep time."""
     global _last_fetch, _needs_redraw, _last_minute, _time_only_update
+    global _drawn_temp_str, _drawn_temp_end_x, _drawn_icon_key
+    global _drawn_hi_str, _drawn_lo_str, _drawn_loading
+    global _prev_bottom_str, _prev_time_only
 
     now = time.monotonic()
 
@@ -484,52 +588,98 @@ def animate(bitmap):
         return 0.5
     _time_only_update = False
 
-    # --- Full redraw ---
-    # Clear
-    for y in range(HEIGHT):
-        for x in range(WIDTH):
-            bitmap[x, y] = 0
-
+    # --- Loading state ---
     if _temperature is None:
-        # Loading state
-        _draw_small_text(30, 12, "LOADING...", COLOR_WHITE)
+        if not _drawn_loading:
+            for y in range(HEIGHT):
+                for x in range(WIDTH):
+                    bitmap[x, y] = 0
+            load_str = "LOADING..."
+            lx = (WIDTH - _measure_text(load_str)) // 2
+            _draw_small_text(lx, 12, load_str, COLOR_WHITE)
+            _drawn_loading = True
         return 0.5
 
+    # If we were showing loading, clear it once
+    if _drawn_loading:
+        for y in range(HEIGHT):
+            for x in range(WIDTH):
+                bitmap[x, y] = 0
+        _drawn_loading = False
+        # Reset all drawn state so everything draws fresh
+        _drawn_temp_str = None
+        _drawn_temp_end_x = 0
+        _drawn_icon_key = None
+        _drawn_hi_str = None
+        _drawn_lo_str = None
+        _prev_bottom_str = None
+        _prev_time_only = None
+
     # --- Left side: icon (12x12) ---
-    icon = _get_icon(_weather_code, _is_day)
-    # Yellow for sun, soft blue for moon, white for cloud/rain/snow
-    if _weather_code is not None and _weather_code <= 1:
-        if _is_day:
-            icon_color = 4  # yellow
-        else:
-            icon_color = 7  # blue (lo color) for moon
-    else:
-        icon_color = COLOR_WHITE
-    _draw_icon(12, 3, icon, icon_color)
+    new_icon_key = _get_icon_key(_weather_code, _is_day)
+    if new_icon_key != _drawn_icon_key:
+        # Clear icon area and redraw
+        _clear_rect(_ICON_X, _ICON_Y, _ICON_W, _ICON_H)
+        icon = _get_icon(_weather_code, _is_day)
+        _draw_icon(_ICON_X, _ICON_Y, icon, new_icon_key[1])
+        _drawn_icon_key = new_icon_key
 
-    # --- Center: large temperature ---
+    # --- Center: large temperature (per-digit incremental) ---
     temp_int = int(round(_temperature)) if _temperature is not None else 0
-    temp_str = f"{temp_int}"
-    # Draw large temp starting after icon
-    end_x = _draw_large_temp(28, 3, temp_str, 3)
+    new_temp_str = f"{temp_int}"
 
-    # Degree symbol (small circle) and F
-    _set_pixel(end_x, 3, 3)
-    _set_pixel(end_x + 1, 3, 3)
-    _set_pixel(end_x, 4, 3)
-    _set_pixel(end_x + 1, 4, 3)
-    _draw_small_text(end_x + 3, 3, "F", 3)
+    if new_temp_str != _drawn_temp_str:
+        old_str = _drawn_temp_str or ""
+
+        # Same length: only redraw changed digits, leave others untouched
+        if len(old_str) == len(new_temp_str):
+            cx = _TEMP_X
+            for i in range(len(new_temp_str)):
+                cw = _large_char_width(new_temp_str[i])
+                if old_str[i] != new_temp_str[i]:
+                    _clear_rect(cx, _TEMP_Y, cw, _TEMP_LARGE_H)
+                    _draw_large_char(cx, _TEMP_Y, new_temp_str[i], 3)
+                cx += cw
+        else:
+            # Different length: clear old region, redraw all digits
+            old_end = _drawn_temp_end_x + 20 if _drawn_temp_end_x > 0 else _TEMP_X
+            _clear_rect(_TEMP_X, _TEMP_Y, old_end - _TEMP_X, _TEMP_LARGE_H)
+            _draw_large_temp(_TEMP_X, _TEMP_Y, new_temp_str, 3)
+
+        # Redraw degree symbol and F (position may shift)
+        new_end_x = _TEMP_X + _measure_large_text(new_temp_str)
+        if new_end_x != _drawn_temp_end_x:
+            if _drawn_temp_end_x > 0:
+                _clear_rect(_drawn_temp_end_x, _TEMP_Y, 20, 7)
+            _set_pixel(new_end_x, 3, 3)
+            _set_pixel(new_end_x + 1, 3, 3)
+            _set_pixel(new_end_x, 4, 3)
+            _set_pixel(new_end_x + 1, 4, 3)
+            _draw_small_text(new_end_x + 3, 3, "F", 3)
+
+        _drawn_temp_str = new_temp_str
+        _drawn_temp_end_x = new_end_x
 
     # --- Right side: Hi/Lo ---
-    right_x = 90
+    new_hi_str = f"H:{int(round(_temp_high))}" if _temp_high is not None else None
+    if new_hi_str != _drawn_hi_str:
+        # Clear old
+        if _drawn_hi_str is not None:
+            old_w = _measure_text(_drawn_hi_str)
+            _clear_rect(_HILO_X, _HI_Y, old_w, 7)
+        if new_hi_str is not None:
+            _draw_small_text(_HILO_X, _HI_Y, new_hi_str, 6)
+        _drawn_hi_str = new_hi_str
 
-    if _temp_high is not None:
-        hi_str = f"H:{int(round(_temp_high))}"
-        _draw_small_text(right_x, 3, hi_str, 6)
-
-    if _temp_low is not None:
-        lo_str = f"L:{int(round(_temp_low))}"
-        _draw_small_text(right_x, 12, lo_str, 7)
+    new_lo_str = f"L:{int(round(_temp_low))}" if _temp_low is not None else None
+    if new_lo_str != _drawn_lo_str:
+        # Clear old
+        if _drawn_lo_str is not None:
+            old_w = _measure_text(_drawn_lo_str)
+            _clear_rect(_HILO_X, _LO_Y, old_w, 7)
+        if new_lo_str is not None:
+            _draw_small_text(_HILO_X, _LO_Y, new_lo_str, 7)
+        _drawn_lo_str = new_lo_str
 
     # --- Bottom: time - conditions text ---
     _draw_bottom_text()

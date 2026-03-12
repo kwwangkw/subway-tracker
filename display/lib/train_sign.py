@@ -132,7 +132,7 @@ def _measure_text(text):
         if trimmed is None:
             continue
         width += len(trimmed) + 1  # glyph width + 1px spacing
-    return width
+    return width - 1 if width > 0 else 0  # remove trailing spacing
 
 
 def _draw_text(bitmap, x, y, text, color_index):
@@ -508,23 +508,22 @@ def draw_loading_screen(bitmap, palette, mode=None):
     top_y = (HEIGHT - total_h) // 2
 
     l1 = _MODE_TITLES.get(mode, "NYC SUBWAY") if mode else "NYC SUBWAY"
-    l2 = "LOADING..."  # Center with all 3 dots so it looks balanced
+    l2 = "LOADING"
     l1_x = (WIDTH - _measure_text(l1)) // 2
     l2_x = (WIDTH - _measure_text(l2)) // 2
 
     _draw_text(bitmap, l1_x, top_y, l1, COLOR_WHITE)
-    # Only draw "LOADING" initially - dots will animate in
-    _draw_text(bitmap, l2_x, top_y + line_h + gap, "LOADING", COLOR_WHITE)
+    _draw_text(bitmap, l2_x, top_y + line_h + gap, l2, COLOR_WHITE)
 
     # Return info needed for dot animation
-    dots_x = l2_x + _measure_text("LOADING")
+    dots_x = l2_x + _measure_text(l2) + 1  # +1 for spacing after last char
     dots_y = top_y + line_h + gap
     return dots_x, dots_y
 
 
 def draw_loading_dots(bitmap, dots_x, dots_y, dot_count):
     """Draw 0-3 dots after 'LOADING' text. Call repeatedly to animate."""
-    dot_w = _measure_text(".")
+    dot_w = _measure_text(".") + 1  # char advance = glyph width + spacing
     for i in range(3):
         x = dots_x + i * dot_w
         # Clear or draw each dot position
