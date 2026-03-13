@@ -492,6 +492,13 @@ def _build_bottom_text():
     return bottom_str, bottom_w, None
 
 
+def _char_width(ch):
+    """Return pixel width of a single small character (glyph columns)."""
+    from font_data import FONT_5x7
+    glyph = FONT_5x7.get(ch, FONT_5x7.get(" "))
+    return len(glyph) if glyph else 4
+
+
 def _draw_bottom_text():
     """Draw the bottom time/condition bar, clearing old text first."""
     global _prev_bottom_str, _prev_bottom_x
@@ -508,10 +515,22 @@ def _draw_bottom_text():
 
     # Redraw main bottom bar if changed
     if bottom_changed:
-        if _prev_bottom_str is not None:
-            prev_w = _measure_text(_prev_bottom_str)
-            _clear_rect(_prev_bottom_x, bottom_y, prev_w, 7)
-        _draw_small_text(bottom_x, bottom_y, bottom_str, 5)
+        old_str = _prev_bottom_str or ""
+        # Same length & same position: per-character diff (only redraw changed chars)
+        if len(old_str) == len(bottom_str) and bottom_x == _prev_bottom_x:
+            cx = bottom_x
+            for i in range(len(bottom_str)):
+                cw = _char_width(bottom_str[i])
+                if old_str[i] != bottom_str[i]:
+                    _clear_rect(cx, bottom_y, cw + 1, 7)  # +1 for gap
+                    _draw_small_text(cx, bottom_y, bottom_str[i], 5)
+                cx += cw + 1
+        else:
+            # Different length or position: full clear + redraw
+            if old_str:
+                prev_w = _measure_text(old_str)
+                _clear_rect(_prev_bottom_x, bottom_y, prev_w, 7)
+            _draw_small_text(bottom_x, bottom_y, bottom_str, 5)
         _prev_bottom_str = bottom_str
         _prev_bottom_x = bottom_x
 
