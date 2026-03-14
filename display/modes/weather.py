@@ -595,18 +595,18 @@ def _draw_feels_like():
 
 # Layout constants
 _ICON_X = 12
-_ICON_Y = 3
+_ICON_Y = 2
 _ICON_W = 12
 _ICON_H = 10
 _TEMP_X = 28
-_TEMP_Y = 3
+_TEMP_Y = 2
 _TEMP_LARGE_H = 14  # 7 rows * 2
 _HILO_X = 90
-_HI_Y = 3
-_LO_Y = 12
+_HI_Y = 2
+_LO_Y = 11
 _FEELS_X = 12    # same as icon left edge
-_FEELS_Y = 15    # below temp area, above bottom bar
-_BOTTOM_Y = 26   # 3x5 font is 5px tall → rows 26-30, fits in 32px
+_FEELS_Y = 14    # below temp area, above bottom bar
+_BOTTOM_Y = 25   # 3x5 font is 5px tall → rows 25-29
 
 
 def animate(bitmap):
@@ -704,11 +704,11 @@ def animate(bitmap):
         if new_end_x != _drawn_temp_end_x:
             if _drawn_temp_end_x > 0:
                 _clear_rect(_drawn_temp_end_x, _TEMP_Y, 20, 7)
-            _set_pixel(new_end_x, 3, 3)
-            _set_pixel(new_end_x + 1, 3, 3)
-            _set_pixel(new_end_x, 4, 3)
-            _set_pixel(new_end_x + 1, 4, 3)
-            _draw_small_text(new_end_x + 3, 3, "F", 3)
+            _set_pixel(new_end_x, _TEMP_Y, 3)
+            _set_pixel(new_end_x + 1, _TEMP_Y, 3)
+            _set_pixel(new_end_x, _TEMP_Y + 1, 3)
+            _set_pixel(new_end_x + 1, _TEMP_Y + 1, 3)
+            _draw_small_text(new_end_x + 3, _TEMP_Y, "F", 3)
 
         _drawn_temp_str = new_temp_str
         _drawn_temp_end_x = new_end_x
