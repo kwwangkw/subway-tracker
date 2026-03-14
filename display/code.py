@@ -296,9 +296,10 @@ def _activate_mode(mode_name):
     else:
         mod.setup(bitmap, palette)
 
-    # If activating weather, push current zip from web_server
+    # If activating weather, push current zip and animation setting from web_server
     if mode_name == "weather":
-        mod.update_config(zip_code=web_server._zip_code)
+        mod.update_config(zip_code=web_server._zip_code,
+                          animated=web_server._animated_weather)
 
     # If activating stocks, push current symbols from web_server
     if mode_name == "stocks":
@@ -507,6 +508,9 @@ while True:
             if "symbols" in s:
                 if current_mode_name == "stocks" and current_module is not None:
                     current_module.update_config(symbols=s["symbols"])
+            if "animated" in s:
+                if current_mode_name == "weather" and current_module is not None:
+                    current_module.update_config(animated=s["animated"])
             if "birthdays" in s:
                 # If currently in birthday mode, reactivate with new name
                 if current_mode_name == "birthday" and current_module is not None:

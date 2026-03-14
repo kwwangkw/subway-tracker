@@ -8,6 +8,7 @@ import time
 import os
 import gc
 import ssl
+import random
 import adafruit_requests
 
 from train_sign import _dim, COLOR_BLACK, COLOR_WHITE
@@ -19,6 +20,14 @@ HEIGHT = 32
 # Configuration
 ZIP_CODE = os.getenv("WEATHER_ZIP", "10001")
 REFRESH_INTERVAL = 300  # 5 minutes
+
+# --- TEST: Set to a WMO code to force a specific icon, or None for normal ---
+# 0=Sun, 2=Cloud, 55=Rain, 73=Snow, 95=Thunder
+# Set _TEST_IS_DAY=False for Moon (with code 0)
+_TEST_WEATHER_CODE = None
+_TEST_IS_DAY = None  # True=day(Sun), False=night(Moon), None=normal
+
+_animated_weather = False  # toggled via web settings
 
 _bitmap = None
 _palette = None
@@ -49,6 +58,11 @@ _drawn_hi_str = None
 _drawn_lo_str = None
 _drawn_feels_str = None  # e.g. "Feels Like 72"
 _drawn_loading = False   # True if loading screen is currently shown
+_icon_frame = 0          # animation frame counter for weather icon
+_next_icon_change = 0    # monotonic time for next icon frame change
+_icon_showing_alt = False  # whether showing alternate frame
+_star_states = None      # list of (on:bool, next_change:float) per star pixel
+_snow_flakes = None      # list of [col, row] for each snowflake pixel
 
 # WMO weather codes -> description and icon type
 WMO_CODES = {
@@ -82,113 +96,423 @@ WMO_CODES = {
     99: "T-storm w/ Hail",
 }
 
-# Icon pixel art (simple 12x12 weather icons)
-# Sun
+# Icon pixel art (simple 12x10 weather icons, 2 frames each for animation)
+# Sun - round circle with cardinal rays, rays rotate to diagonals
 _SUN = [
-    "....XX.X....",
-    ".....XX.....",
-    "..X.XXXX.X..",
-    "...XXXXXX...",
-    "XXXXXXXXXXXX",
-    "XXXXXXXXXXXX",
-    "...XXXXXX...",
-    "..X.XXXX.X..",
-    ".....XX.....",
-    "....XX.X....",
+    [
+        ".....X......",
+        "........X...",
+        ".X..XXXX....",
+        "...XXXXXX...",
+        "..XXXXXXXX.X",
+        "..XXXXXXXX..",
+        "X.XXXXXXXX..",
+        "...XXXXXX...",
+        "....XXXX..X.",
+        "...X........",
+        "......X.....",
+    ],
+    [
+        "......X.....",
+        "..X......X..",
+        "....XXXX....",
+        "...XXXXXX...",
+        "..XXXXXXXX..",
+        "X.XXXXXXXX.X",
+        "..XXXXXXXX..",
+        "...XXXXXX...",
+        "....XXXX....",
+        "..X......X..",
+        ".....X......",
+    ]
 ]
 
-# Moon (crescent)
+# Moon - filled crescent (single frame base, stars handled separately)
 _MOON = [
-    "....XXXXX...",
-    "...XXXXXXX..",
-    "..XXXXXXX...",
-    ".XXXXXXX....",
-    ".XXXXXX.....",
-    ".XXXXXX.....",
-    ".XXXXXXX....",
-    "..XXXXXXX...",
-    "...XXXXXXX..",
-    "....XXXXX...",
+    [
+        "....XXX.....",
+        "..XXX.......",
+        "..XX........",
+        ".XX.........",
+        ".XX.........",
+        ".XX......X..",
+        ".XXX....XX..",
+        "..XXXXXXX...",
+        "...XXXXXX...",
+        "....XXXX....",
+        "............",
+    ],
 ]
 
-# Cloud
+# Star pixel offsets within icon grid (col, row) - each twinkles independently
+_MOON_STARS = [(6, 2), (4, 4), (7, 5)]
+
+# Cloud - top bump shifts right
 _CLOUD = [
-    "............",
-    "....XXXX....",
-    "...XXXXXX...",
-    "..XXXXXXXX..",
-    ".XXXXXXXXXX.",
-    "XXXXXXXXXXXX",
-    "XXXXXXXXXXXX",
-    ".XXXXXXXXXX.",
-    "............",
-    "............",
+    [
+        "............",
+        "....XXXX....",
+        "...XXXXXX...",
+        "..XXXXXXXX..",
+        ".XXXXXXXXXX.",
+        "XXXXXXXXXXXX",
+        "XXXXXXXXXXXX",
+        ".XXXXXXXXXX.",
+        "............",
+        "............",
+        "............",
+    ],
+    [
+        "............",
+        ".....XXXX...",
+        "....XXXXXX..",
+        "..XXXXXXXXX.",
+        ".XXXXXXXXXX.",
+        "XXXXXXXXXXXX",
+        "XXXXXXXXXXXX",
+        ".XXXXXXXXXX.",
+        "............",
+        "............",
+        "............",
+    ],
 ]
 
-# Rain
+# Rain - 3 drop columns falling continuously (6 frames)
 _RAIN = [
-    "....XXXX....",
-    "...XXXXXX...",
-    "..XXXXXXXX..",
-    "XXXXXXXXXXXX",
-    "XXXXXXXXXXXX",
-    "............",
-    ".X..X..X..X.",
-    "..X..X..X...",
-    ".X..X..X..X.",
-    "............",
+    [
+        "....XXXX....",
+        "...XXXXXX...",
+        "..XXXXXXXX..",
+        "XXXXXXXXXXXX",
+        "XXXXXXXXXXXX",
+        "..X.....X...",
+        "............",
+        ".......X....",
+        "....X.......",
+        "..X.........",
+        "............",
+    ],
+    [
+        "....XXXX....",
+        "...XXXXXX...",
+        "..XXXXXXXX..",
+        "XXXXXXXXXXXX",
+        "XXXXXXXXXXXX",
+        "............",
+        "..X.....X...",
+        "............",
+        ".......X....",
+        "....X.......",
+        "..X.........",
+    ],
+    [
+        "....XXXX....",
+        "...XXXXXX...",
+        "..XXXXXXXX..",
+        "XXXXXXXXXXXX",
+        "XXXXXXXXXXXX",
+        "..X.........",
+        "............",
+        "..X.....X...",
+        "............",
+        ".......X....",
+        "....X.......",
+    ],
+    [
+        "....XXXX....",
+        "...XXXXXX...",
+        "..XXXXXXXX..",
+        "XXXXXXXXXXXX",
+        "XXXXXXXXXXXX",
+        "....X.......",
+        "..X.........",
+        "............",
+        "..X.....X...",
+        "............",
+        ".......X....",
+    ],
+    [
+        "....XXXX....",
+        "...XXXXXX...",
+        "..XXXXXXXX..",
+        "XXXXXXXXXXXX",
+        "XXXXXXXXXXXX",
+        ".......X....",
+        "....X.......",
+        "..X.........",
+        "............",
+        "..X.....X...",
+        "............",
+    ],
+    [
+        "....XXXX....",
+        "...XXXXXX...",
+        "..XXXXXXXX..",
+        "XXXXXXXXXXXX",
+        "XXXXXXXXXXXX",
+        "............",
+        ".......X....",
+        "....X.......",
+        "..X.........",
+        "............",
+        "..X.....X...",
+    ],
 ]
 
-# Snow
+# Snow - cloud only (flakes animated dynamically)
 _SNOW = [
-    "....XXXX....",
-    "...XXXXXX...",
-    "..XXXXXXXX..",
-    "XXXXXXXXXXXX",
-    "XXXXXXXXXXXX",
-    "............",
-    ".X...X...X..",
-    "...X...X....",
-    "..X...X...X.",
-    "............",
+    [
+        "....XXXX....",
+        "...XXXXXX...",
+        "..XXXXXXXX..",
+        "XXXXXXXXXXXX",
+        "XXXXXXXXXXXX",
+        "............",
+        "............",
+        "............",
+        "............",
+        "............",
+        "............",
+    ],
 ]
 
-# Thunder
+# Thunder - two bolts strike down offset, then disappear
 _THUNDER = [
-    "....XXXX....",
-    "...XXXXXX...",
-    "XXXXXXXXXXXX",
-    "XXXXXXXXXXXX",
-    "............",
-    "....XX......",
-    "...XXXX.....",
-    ".....XX.....",
-    "....XX......",
-    "............",
+    [  # frame 0: bolt1 row 1
+        "....XXXX....",
+        "...XXXXXX...",
+        "..XXXXXXXX..",
+        "XXXXXXXXXXXX",
+        "XXXXXXXXXXXX",
+        "...XX.......",
+        "............",
+        "............",
+        "............",
+        "............",
+        "............",
+    ],
+    [  # frame 1: bolt1 rows 1-2
+        "....XXXX....",
+        "...XXXXXX...",
+        "..XXXXXXXX..",
+        "XXXXXXXXXXXX",
+        "XXXXXXXXXXXX",
+        "...XX.......",
+        "..XX........",
+        "............",
+        "............",
+        "............",
+        "............",
+    ],
+    [  # frame 2: bolt1 rows 1-3, bolt2 row 1
+        "....XXXX....",
+        "...XXXXXX...",
+        "..XXXXXXXX..",
+        "XXXXXXXXXXXX",
+        "XXXXXXXXXXXX",
+        "...XX..XX...",
+        "..XX........",
+        ".XXXX.......",
+        "............",
+        "............",
+        "............",
+    ],
+    [  # frame 3: bolt1 rows 1-4, bolt2 rows 1-2
+        "....XXXX....",
+        "...XXXXXX...",
+        "..XXXXXXXX..",
+        "XXXXXXXXXXXX",
+        "XXXXXXXXXXXX",
+        "...XX..XX...",
+        "..XX....XX..",
+        ".XXXX.......",
+        "...XX.......",
+        "............",
+        "............",
+    ],
+    [  # frame 4: bolt1 rows 1-5, bolt2 rows 1-3
+        "....XXXX....",
+        "...XXXXXX...",
+        "..XXXXXXXX..",
+        "XXXXXXXXXXXX",
+        "XXXXXXXXXXXX",
+        "...XX..XX...",
+        "..XX....XX..",
+        ".XXXX.XX....",
+        "...XX.......",
+        "..XX........",
+        "............",
+    ],
+    [  # frame 5: full bolt1, bolt2 rows 1-4
+        "....XXXX....",
+        "...XXXXXX...",
+        "..XXXXXXXX..",
+        "XXXXXXXXXXXX",
+        "XXXXXXXXXXXX",
+        "...XX..XX...",
+        "..XX....XX..",
+        ".XXXX.XX....",
+        "...XX..XX...",
+        "..XX........",
+        "...X........",
+    ],
+    [  # frame 6: full bolt1, full bolt2
+        "....XXXX....",
+        "...XXXXXX...",
+        "..XXXXXXXX..",
+        "XXXXXXXXXXXX",
+        "XXXXXXXXXXXX",
+        ".......XX...",
+        "........XX..",
+        "......XX....",
+        ".......XX...",
+        "......XX....",
+        ".......X....",
+    ]
+]
+
+# --- Static icons (no animation, 10 rows) ---
+_STATIC_SUN = [
+    [
+        "....XX.X....",
+        ".....XX.....",
+        "..X.XXXX.X..",
+        "...XXXXXX...",
+        "XXXXXXXXXXXX",
+        "XXXXXXXXXXXX",
+        "...XXXXXX...",
+        "..X.XXXX.X..",
+        ".....XX.....",
+        "....XX.X....",
+    ],
+]
+
+_STATIC_MOON = [
+    [
+        "....XXXXX...",
+        "...XXXXXXX..",
+        "..XXXXXXX...",
+        ".XXXXXXX....",
+        ".XXXXXX.....",
+        ".XXXXXX.....",
+        ".XXXXXXX....",
+        "..XXXXXXX...",
+        "...XXXXXXX..",
+        "....XXXXX...",
+    ],
+]
+
+_STATIC_CLOUD = [
+    [
+        "............",
+        "....XXXX....",
+        "...XXXXXX...",
+        "..XXXXXXXX..",
+        ".XXXXXXXXXX.",
+        "XXXXXXXXXXXX",
+        "XXXXXXXXXXXX",
+        ".XXXXXXXXXX.",
+        "............",
+        "............",
+    ],
+]
+
+_STATIC_RAIN = [
+    [
+        "....XXXX....",
+        "...XXXXXX...",
+        "..XXXXXXXX..",
+        "XXXXXXXXXXXX",
+        "XXXXXXXXXXXX",
+        "............",
+        ".X..X..X..X.",
+        "..X..X..X...",
+        ".X..X..X..X.",
+        "............",
+    ],
+]
+
+_STATIC_SNOW = [
+    [
+        "....XXXX....",
+        "...XXXXXX...",
+        "..XXXXXXXX..",
+        "XXXXXXXXXXXX",
+        "XXXXXXXXXXXX",
+        "............",
+        ".X...X...X..",
+        "...X...X....",
+        "..X...X...X.",
+        "............",
+    ],
+]
+
+_STATIC_THUNDER = [
+    [
+        "....XXXX....",
+        "...XXXXXX...",
+        "XXXXXXXXXXXX",
+        "XXXXXXXXXXXX",
+        "............",
+        "....XX......",
+        "...XXXX.....",
+        ".....XX.....",
+        "....XX......",
+        "............",
+    ],
 ]
 
 
-def _get_icon(code, is_day=True):
+def _get_icon_list(code, is_day=True):
+    """Return the list of icon frames for a WMO weather code."""
+    if _animated_weather:
+        if code is None:
+            return _CLOUD
+        elif code <= 1:
+            return _SUN if is_day else _MOON
+        elif code <= 3:
+            return _CLOUD
+        elif code <= 48:
+            return _CLOUD  # fog
+        elif code <= 57:
+            return _RAIN   # drizzle
+        elif code <= 67:
+            return _RAIN
+        elif code <= 77:
+            return _SNOW
+        elif code <= 82:
+            return _RAIN   # showers
+        elif code <= 86:
+            return _SNOW   # snow showers
+        else:
+            return _THUNDER
+    else:
+        if code is None:
+            return _STATIC_CLOUD
+        elif code <= 1:
+            return _STATIC_SUN if is_day else _STATIC_MOON
+        elif code <= 3:
+            return _STATIC_CLOUD
+        elif code <= 48:
+            return _STATIC_CLOUD
+        elif code <= 57:
+            return _STATIC_RAIN
+        elif code <= 67:
+            return _STATIC_RAIN
+        elif code <= 77:
+            return _STATIC_SNOW
+        elif code <= 82:
+            return _STATIC_RAIN
+        elif code <= 86:
+            return _STATIC_SNOW
+        else:
+            return _STATIC_THUNDER
+
+
+def _get_icon(code, is_day=True, frame=0):
     """Return icon pixel art for a WMO weather code."""
-    if code is None:
-        return _CLOUD
-    if code <= 1:
-        return _SUN if is_day else _MOON
-    if code <= 3:
-        return _CLOUD
-    if code <= 48:
-        return _CLOUD  # fog
-    if code <= 57:
-        return _RAIN   # drizzle
-    if code <= 67:
-        return _RAIN
-    if code <= 77:
-        return _SNOW
-    if code <= 82:
-        return _RAIN   # showers
-    if code <= 86:
-        return _SNOW   # snow showers
-    return _THUNDER
+    icons = _get_icon_list(code, is_day)
+    return icons[frame % len(icons)]
 
 
 def _clear_rect(x, y, w, h):
@@ -282,6 +606,21 @@ def _draw_icon(x, y, icon, color):
         for col_i, ch in enumerate(row_str):
             if ch == "X":
                 _set_pixel(x + col_i, y + row_i, color)
+
+
+def _draw_icon_diff(x, y, old_icon, new_icon, color):
+    """Redraw only the pixels that changed between two icon frames."""
+    for row_i in range(len(new_icon)):
+        old_row = old_icon[row_i] if old_icon and row_i < len(old_icon) else ""
+        new_row = new_icon[row_i]
+        for col_i in range(len(new_row)):
+            old_ch = old_row[col_i] if col_i < len(old_row) else "."
+            new_ch = new_row[col_i]
+            if old_ch != new_ch:
+                if new_ch == "X":
+                    _set_pixel(x + col_i, y + row_i, color)
+                else:
+                    _set_pixel(x + col_i, y + row_i, 0)
 
 
 def _large_char_width(ch):
@@ -399,6 +738,12 @@ def _fetch_weather(requests_session):
         _weather_code = current.get("weather_code")
         _is_day = bool(current.get("is_day", 1))
 
+        # Test override
+        if _TEST_WEATHER_CODE is not None:
+            _weather_code = _TEST_WEATHER_CODE
+        if _TEST_IS_DAY is not None:
+            _is_day = _TEST_IS_DAY
+
         # Auto-detect timezone from API response
         utc_off = data.get("utc_offset_seconds")
         if utc_off is not None:
@@ -425,9 +770,10 @@ def get_tz_offset():
     return _tz_offset
 
 
-def update_config(zip_code=None, **kwargs):
+def update_config(zip_code=None, animated=None, **kwargs):
     """Update weather config and force a re-fetch."""
     global ZIP_CODE, _lat, _lon, _location, _last_fetch, _tz_offset
+    global _animated_weather, _ICON_H, _needs_redraw, _drawn_icon_key
     if zip_code is not None and zip_code != ZIP_CODE:
         ZIP_CODE = zip_code
         _lat = None  # force re-geocode
@@ -435,7 +781,12 @@ def update_config(zip_code=None, **kwargs):
         _location = ""
         _tz_offset = None
         _last_fetch = 0  # force immediate re-fetch
-    print(f"Weather config updated: ZIP={ZIP_CODE}")
+    if animated is not None and animated != _animated_weather:
+        _animated_weather = animated
+        _ICON_H = 11 if _animated_weather else 10
+        _drawn_icon_key = None  # force icon redraw
+        _needs_redraw = True
+    print(f"Weather config updated: ZIP={ZIP_CODE} animated={_animated_weather}")
 
 
 def setup(bitmap, palette, pool=None, **kwargs):
@@ -446,6 +797,11 @@ def setup(bitmap, palette, pool=None, **kwargs):
     global _last_minute, _prev_bottom_str, _prev_bottom_x
     global _drawn_temp_str, _drawn_temp_end_x, _drawn_icon_key
     global _drawn_hi_str, _drawn_lo_str, _drawn_feels_str, _drawn_loading
+    global _icon_frame
+    global _next_icon_change, _icon_showing_alt, _star_states
+    global _snow_flakes, _ICON_H
+
+    _ICON_H = 11 if _animated_weather else 10
 
     _bitmap = bitmap
     _palette = palette
@@ -470,6 +826,11 @@ def setup(bitmap, palette, pool=None, **kwargs):
     _drawn_lo_str = None
     _drawn_feels_str = None
     _drawn_loading = False
+    _icon_frame = 0
+    _next_icon_change = 0
+    _icon_showing_alt = False
+    _star_states = None
+    _snow_flakes = None
 
     # Set up colors
     palette[COLOR_BLACK] = 0x000000
@@ -597,7 +958,7 @@ def _draw_feels_like():
 _ICON_X = 12
 _ICON_Y = 2
 _ICON_W = 12
-_ICON_H = 10
+_ICON_H = 10  # updated dynamically: 11 if animated, 10 if static
 _TEMP_X = 28
 _TEMP_Y = 2
 _TEMP_LARGE_H = 14  # 7 rows * 2
@@ -614,7 +975,9 @@ def animate(bitmap):
     global _last_fetch, _needs_redraw, _last_minute
     global _drawn_temp_str, _drawn_temp_end_x, _drawn_icon_key
     global _drawn_hi_str, _drawn_lo_str, _drawn_feels_str, _drawn_loading
-    global _prev_bottom_str
+    global _prev_bottom_str, _icon_frame
+    global _next_icon_change, _icon_showing_alt, _star_states
+    global _snow_flakes
 
     now = time.monotonic()
 
@@ -636,8 +999,56 @@ def animate(bitmap):
         if not _needs_redraw:
             _needs_redraw = True
 
-    # Nothing to update
+    # Nothing to update (except icon animation)
     if not _needs_redraw:
+        if _animated_weather and _temperature is not None and _drawn_icon_key is not None:
+            # Moon: per-star independent random twinkle
+            is_moon = _weather_code is not None and _weather_code <= 1 and not _is_day
+            is_snow = _weather_code is not None and _weather_code >= 71 and _weather_code <= 77 or _weather_code is not None and _weather_code >= 85 and _weather_code <= 86
+            if is_moon and _star_states is not None:
+                color = _drawn_icon_key[1]
+                for i, (cx, cy) in enumerate(_MOON_STARS):
+                    on, next_t = _star_states[i]
+                    if now >= next_t:
+                        on = not on
+                        if on:
+                            next_t = now + random.uniform(0.3, 1.0)
+                        else:
+                            next_t = now + random.uniform(1.5, 5.0)
+                        _star_states[i] = (on, next_t)
+                        _set_pixel(_ICON_X + cx, _ICON_Y + cy, color if on else 0)
+            # Snow: per-flake drift (like christmas mode)
+            elif is_snow and _snow_flakes is not None:
+                color = _drawn_icon_key[1]
+                for flake in _snow_flakes:
+                    # Erase old position
+                    _set_pixel(_ICON_X + flake[0], _ICON_Y + 5 + flake[1], 0)
+                    # Move down 1
+                    flake[1] += 1
+                    # Sway sideways ~25% of the time
+                    if random.randint(0, 3) == 0:
+                        flake[0] += random.choice([-1, 1])
+                        flake[0] = max(0, min(11, flake[0]))
+                    # Wrap around
+                    if flake[1] > 5:
+                        flake[1] = 0
+                        flake[0] = random.randint(1, 10)
+                    # Draw new position
+                    _set_pixel(_ICON_X + flake[0], _ICON_Y + 5 + flake[1], color)
+            # Other icons: fixed-interval frame cycle
+            elif not is_moon and now >= _next_icon_change:
+                icons = _get_icon_list(_weather_code, _is_day)
+                old_frame = _icon_frame % len(icons)
+                _icon_frame += 1
+                new_frame = _icon_frame % len(icons)
+                is_thunder = _weather_code is not None and _weather_code >= 95
+                if is_thunder:
+                    _next_icon_change = now + 0.08
+                else:
+                    _next_icon_change = now + 0.4
+                old_icon = icons[old_frame]
+                new_icon = icons[new_frame]
+                _draw_icon_diff(_ICON_X, _ICON_Y, old_icon, new_icon, _drawn_icon_key[1])
         return 0.5
     _needs_redraw = False
 
@@ -668,14 +1079,32 @@ def animate(bitmap):
         _drawn_feels_str = None
         _prev_bottom_str = None
 
-    # --- Left side: icon (12x12) ---
+    # --- Left side: icon (12x10, animated) ---
     new_icon_key = _get_icon_key(_weather_code, _is_day)
-    if new_icon_key != _drawn_icon_key:
-        # Clear icon area and redraw
+    if _drawn_icon_key is None:
+        # First draw or after loading: full draw
         _clear_rect(_ICON_X, _ICON_Y, _ICON_W, _ICON_H)
-        icon = _get_icon(_weather_code, _is_day)
+        _icon_showing_alt = False
+        _next_icon_change = now + random.uniform(2.0, 6.0)
+        icon = _get_icon(_weather_code, _is_day, 0)
         _draw_icon(_ICON_X, _ICON_Y, icon, new_icon_key[1])
-        _drawn_icon_key = new_icon_key
+        # Init per-star states for moon
+        is_moon = _animated_weather and _weather_code is not None and _weather_code <= 1 and not _is_day
+        is_snow = _animated_weather and (_weather_code is not None and _weather_code >= 71 and _weather_code <= 77 or _weather_code is not None and _weather_code >= 85 and _weather_code <= 86)
+        if is_moon:
+            _star_states = [(False, now + random.uniform(1.0, 4.0)) for _ in _MOON_STARS]
+        else:
+            _star_states = None
+        if is_snow:
+            # Evenly distribute flakes across rows so they don't clump
+            _snow_flakes = [[random.randint(1, 10), i % 6] for i in range(7)]
+        else:
+            _snow_flakes = None
+    else:
+        cur_frame = 1 if _icon_showing_alt else 0
+        icon = _get_icon(_weather_code, _is_day, cur_frame)
+        _draw_icon_diff(_ICON_X, _ICON_Y, _get_icon(_weather_code, _is_day, 0), icon, new_icon_key[1])
+    _drawn_icon_key = new_icon_key
 
     # --- Center: large temperature (per-digit incremental) ---
     temp_int = int(round(_temperature)) if _temperature is not None else 0

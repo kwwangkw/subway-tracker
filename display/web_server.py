@@ -46,6 +46,7 @@ _pending_stops = None  # set by poll(), consumed by code.py
 _zip_code = "10001"
 _stock_symbols = "AAPL,GOOGL,MSFT"
 _birthdays = ""  # Name:MM-DD,Name:MM-DD
+_animated_weather = False  # animate weather icons
 _mode = "train"  # current mode, persisted via NVM
 
 
@@ -88,6 +89,7 @@ def _save_nvm():
             f"zip={_zip_code}\n"
             f"symbols={_stock_symbols}\n"
             f"birthdays={_birthdays}\n"
+            f"anim={1 if _animated_weather else 0}\n"
         )
         raw = _NVM_MARKER + data.encode("utf-8") + b"\x00"
         nvm = microcontroller.nvm
@@ -116,7 +118,7 @@ def load_mode():
 def start(pool, port=80):
     """Start the HTTP server on the given port. Returns True if successful."""
     global _server_socket, _pool, _mdns_server, _stops_config
-    global _zip_code, _stock_symbols, _birthdays
+    global _zip_code, _stock_symbols, _birthdays, _animated_weather
     _pool = pool
 
     # Initialize from settings.toml (defaults)
@@ -140,6 +142,8 @@ def start(pool, port=80):
             _stock_symbols = saved["symbols"]
         if "birthdays" in saved:
             _birthdays = saved["birthdays"]
+        if "anim" in saved:
+            _animated_weather = saved["anim"] != "0"
 
     # Set up mDNS so http://display.local works
     try:
@@ -245,7 +249,7 @@ def _parse_settings_form(body):
 
     Returns dict with changed values, or None.
     """
-    global _zip_code, _stock_symbols, _birthdays
+    global _zip_code, _stock_symbols, _birthdays, _animated_weather
     fields = {}
     for pair in body.split("&"):
         if "=" in pair:
@@ -301,6 +305,12 @@ def _parse_settings_form(body):
         if new_bd != _birthdays:
             _birthdays = new_bd
             changed["birthdays"] = new_bd
+
+    # Animated weather (checkbox: present=on, absent=off)
+    new_anim = "anim" in fields
+    if new_anim != _animated_weather:
+        _animated_weather = new_anim
+        changed["animated"] = new_anim
 
     if changed:
         print(f"Settings updated: {changed}")
@@ -505,6 +515,23 @@ def _send_page(client, current_mode):
     parts.append(_birthdays)
     parts.append('" placeholder="Alice:3-14,Bob:7-22"></div>')
     parts.append('<div class="hint">Name:MM-DD comma-separated</div>')
+
+    # Animated weather toggle
+    parts.append('<div class="row" style="margin-top:12px;display:flex;'
+                 'align-items:center;justify-content:space-between">')
+    parts.append('<span style="color:#888;font-size:.8em">Animated Weather Icons</span>')
+    parts.append('<label style="position:relative;display:inline-block;width:44px;height:24px">')
+    parts.append('<input type="checkbox" name="anim" value="1" style="opacity:0;width:0;height:0"')
+    if _animated_weather:
+        parts.append(' checked')
+    parts.append('>')
+    parts.append('<span style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;'
+                 'background:#333;border-radius:24px;transition:.3s"></span>')
+    parts.append('<span style="position:absolute;height:18px;width:18px;left:3px;bottom:3px;'
+                 'background:#888;border-radius:50%;transition:.3s;pointer-events:none"></span>')
+    parts.append('</label></div>')
+    parts.append('<style>.row input:checked+span{background:#2d5a2d}'
+                 '.row input:checked+span+span{transform:translateX(20px);background:#6f6}</style>')
 
     parts.append('<button type="submit" class="sb">Save</button>')
     parts.append("</form>")
