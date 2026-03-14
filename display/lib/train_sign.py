@@ -563,25 +563,3 @@ def draw_no_wifi_screen(bitmap, palette):
 
     _draw_text(bitmap, l1_x, top_y, l1, COLOR_WHITE)
     _draw_text(bitmap, l2_x, top_y + line_h + gap, l2, COLOR_WHITE)
-
-
-def draw_wifi_setup_screen(bitmap, palette):
-    """Draw Wi-Fi setup instructions on the LED matrix."""
-    _clear_bitmap(bitmap)
-
-    line_h = 7
-    gap = 2
-
-    l1 = "WIFI SETUP"
-    l2 = "CONNECT TO:"
-    l3 = "DISPLAY-SETUP"
-    l4 = "OPEN BROWSER"
-    l1_x = (WIDTH - _measure_text(l1)) // 2
-    l2_x = (WIDTH - _measure_text(l2)) // 2
-    l3_x = (WIDTH - _measure_text(l3)) // 2
-    l4_x = (WIDTH - _measure_text(l4)) // 2
-
-    _draw_text(bitmap, l1_x, 1, l1, COLOR_WHITE)
-    _draw_text(bitmap, l2_x, 1 + line_h + gap, l2, COLOR_WHITE)
-    _draw_text(bitmap, l3_x, 1 + (line_h + gap) * 2, l3, COLOR_WHITE)
-    _draw_text(bitmap, l4_x, 1 + (line_h + gap) * 3, l4, COLOR_WHITE)

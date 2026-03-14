@@ -98,47 +98,31 @@ wdt.mode = WatchDogMode.RESET
 wdt.feed()
 
 # ---------------------------------------------------------------
-# Wi-Fi connection (NVM creds first, then settings.toml, then AP setup)
+# Wi-Fi connection
 # ---------------------------------------------------------------
 print("Connecting to WiFi...")
 wdt.feed()
-
-_wifi_connected = False
-
-# Try NVM-saved credentials first
-_nvm_ssid, _nvm_pass = web_server.get_wifi_creds()
-if _nvm_ssid and _nvm_pass:
-    print(f"Trying NVM Wi-Fi: {_nvm_ssid}")
-    try:
-        wifi.radio.connect(_nvm_ssid, _nvm_pass)
-        print(f"Connected via NVM! IP: {wifi.radio.ipv4_address}")
-        _wifi_connected = True
-    except Exception as e:
-        print(f"NVM Wi-Fi failed: {e}")
-
-# Fall back to settings.toml
-if not _wifi_connected:
-    _toml_ssid = os.getenv("CIRCUITPY_WIFI_SSID")
-    _toml_pass = os.getenv("CIRCUITPY_WIFI_PASSWORD")
-    if _toml_ssid and _toml_pass:
-        print(f"Trying settings.toml Wi-Fi: {_toml_ssid}")
-        for _attempt in range(3):
-            wdt.feed()
-            try:
-                wifi.radio.connect(_toml_ssid, _toml_pass)
-                print(f"Connected via settings.toml! IP: {wifi.radio.ipv4_address}")
-                _wifi_connected = True
-                break
-            except Exception as e:
-                print(f"settings.toml Wi-Fi attempt {_attempt+1} failed: {e}")
-                time.sleep(2)
-
-# If still not connected, enter AP setup mode
-if not _wifi_connected:
-    print("No Wi-Fi connection - entering setup mode")
-    import wifi_setup
-    wifi_setup.run(bitmap, palette, wdt=wdt)
-    # wifi_setup.run() reboots when done, so we never reach here
+try:
+    wifi.radio.connect(
+        os.getenv("CIRCUITPY_WIFI_SSID"),
+        os.getenv("CIRCUITPY_WIFI_PASSWORD"),
+    )
+    print(f"Connected! IP: {wifi.radio.ipv4_address}")
+except Exception as e:
+    print(f"WiFi connection failed: {e}")
+    draw_no_wifi_screen(bitmap, palette)
+    while True:
+        time.sleep(10)
+        wdt.feed()
+        try:
+            wifi.radio.connect(
+                os.getenv("CIRCUITPY_WIFI_SSID"),
+                os.getenv("CIRCUITPY_WIFI_PASSWORD"),
+            )
+            print(f"Connected! IP: {wifi.radio.ipv4_address}")
+            break
+        except Exception:
+            pass
 
 # ---------------------------------------------------------------
 # NTP time sync (needed for train mode)
