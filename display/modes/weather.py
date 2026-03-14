@@ -469,7 +469,7 @@ def setup(bitmap, palette, pool=None, **kwargs):
     _drawn_hi_str = None
     _drawn_lo_str = None
     _drawn_feels_str = None
-    _drawn_loading = False
+    _drawn_loading = True  # boot loading screen is showing
 
     # Set up colors
     palette[COLOR_BLACK] = 0x000000
@@ -496,10 +496,7 @@ def setup(bitmap, palette, pool=None, **kwargs):
     lr, lg, lb = _dim(0x44, 0x88, 0xFF)
     palette[7] = (lr << 16) | (lg << 8) | lb
 
-    # Clear display
-    for y in range(HEIGHT):
-        for x in range(WIDTH):
-            bitmap[x, y] = 0
+    # Don't clear — boot loading screen persists
 
     # Set up HTTP session
     if pool is not None:
@@ -641,23 +638,13 @@ def animate(bitmap):
         return 0.5
     _needs_redraw = False
 
-    # --- Loading state ---
+    # --- Wait for data (boot loading screen stays visible) ---
     if _temperature is None:
-        if not _drawn_loading:
-            for y in range(HEIGHT):
-                for x in range(WIDTH):
-                    bitmap[x, y] = 0
-            load_str = "LOADING..."
-            lx = (WIDTH - _measure_text(load_str)) // 2
-            _draw_small_text(lx, 12, load_str, COLOR_WHITE)
-            _drawn_loading = True
         return 0.5
 
-    # If we were showing loading, clear it once
+    # Data arrived — single clear + draw
     if _drawn_loading:
-        for y in range(HEIGHT):
-            for x in range(WIDTH):
-                bitmap[x, y] = 0
+        bitmap.fill(0)
         _drawn_loading = False
         # Reset all drawn state so everything draws fresh
         _drawn_temp_str = None

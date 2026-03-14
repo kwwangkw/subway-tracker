@@ -284,7 +284,6 @@ def _activate_mode(mode_name):
     if mod is None:
         return None
 
-    _clear_bitmap()
     wdt.feed()
 
     # Train and weather modes need pool for HTTP; others don't
