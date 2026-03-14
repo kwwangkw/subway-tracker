@@ -10,6 +10,7 @@ import mdns
 import wifi
 import os
 import gc
+import time
 import microcontroller
 
 _server_socket = None
@@ -47,13 +48,15 @@ _zip_code = "10001"
 _stock_symbols = "AAPL,GOOGL,MSFT"
 _birthdays = ""  # Name:MM-DD,Name:MM-DD
 _animated_weather = False  # animate weather icons
+_wifi_ssid = ""  # Wi-Fi SSID from NVM
+_wifi_pass = ""  # Wi-Fi password from NVM
 _mode = "train"  # current mode, persisted via NVM
 
 
 # ---------------------------------------------------------------
 # NVM persistence - stores settings in microcontroller.nvm
 # Format: "key1=val1\nkey2=val2\n" with a null terminator
-# Keys: stops, zip, symbols, birthdays
+# Keys: stops, zip, symbols, birthdays, anim, ssid, pass
 # ---------------------------------------------------------------
 _NVM_MARKER = b"SS"  # 2-byte marker to identify valid NVM data
 
@@ -90,6 +93,8 @@ def _save_nvm():
             f"symbols={_stock_symbols}\n"
             f"birthdays={_birthdays}\n"
             f"anim={1 if _animated_weather else 0}\n"
+            f"ssid={_wifi_ssid}\n"
+            f"pass={_wifi_pass}\n"
         )
         raw = _NVM_MARKER + data.encode("utf-8") + b"\x00"
         nvm = microcontroller.nvm
@@ -115,10 +120,38 @@ def load_mode():
     return saved.get("mode")
 
 
+def get_wifi_creds():
+    """Return (ssid, password) from NVM, or (None, None) if not set."""
+    saved = _load_nvm()
+    ssid = saved.get("ssid", "") or None
+    pw = saved.get("pass", "") or None
+    if ssid and pw:
+        return ssid, pw
+    return None, None
+
+
+def save_wifi_creds(ssid, password):
+    """Save Wi-Fi credentials to NVM."""
+    global _wifi_ssid, _wifi_pass
+    _wifi_ssid = ssid
+    _wifi_pass = password
+    _save_nvm()
+    return True
+
+
+def clear_wifi_creds():
+    """Clear Wi-Fi credentials from NVM."""
+    global _wifi_ssid, _wifi_pass
+    _wifi_ssid = ""
+    _wifi_pass = ""
+    _save_nvm()
+
+
 def start(pool, port=80):
     """Start the HTTP server on the given port. Returns True if successful."""
     global _server_socket, _pool, _mdns_server, _stops_config
     global _zip_code, _stock_symbols, _birthdays, _animated_weather
+    global _wifi_ssid, _wifi_pass
     _pool = pool
 
     # Initialize from settings.toml (defaults)
@@ -144,6 +177,10 @@ def start(pool, port=80):
             _birthdays = saved["birthdays"]
         if "anim" in saved:
             _animated_weather = saved["anim"] != "0"
+        if "ssid" in saved and saved["ssid"]:
+            _wifi_ssid = saved["ssid"]
+        if "pass" in saved and saved["pass"]:
+            _wifi_pass = saved["pass"]
 
     # Set up mDNS so http://display.local works
     try:
@@ -226,6 +263,16 @@ def poll(current_mode):
                     result = {"settings": settings}
                 _send_response(client, 303, "See Other",
                                headers="Location: /\r\n")
+            elif path == "/reset-wifi" and method == "POST":
+                clear_wifi_creds()
+                _send_response(client, 200, "OK",
+                               body="Wi-Fi reset. Rebooting...")
+                try:
+                    client.close()
+                except Exception:
+                    pass
+                time.sleep(1)
+                microcontroller.reset()
             else:
                 _send_page(client, current_mode)
     except Exception as e:
@@ -534,6 +581,14 @@ def _send_page(client, current_mode):
                  '.row input:checked+span+span{transform:translateX(20px);background:#6f6}</style>')
 
     parts.append('<button type="submit" class="sb">Save</button>')
+    parts.append("</form>")
+
+    # Reset Wi-Fi (separate form so it doesn't interfere with settings save)
+    parts.append('<form method="POST" action="/reset-wifi" '
+                 'onsubmit="return confirm(\'Reset Wi-Fi? The display will reboot into setup mode.\')">')
+    parts.append('<button type="submit" style="display:block;width:100%;padding:14px;'
+                 'margin:8px 0;background:#3a1a1a;color:#f66;border:1px solid #5a2d2d;'
+                 'border-radius:10px;font-size:1em;cursor:pointer">Reset Wi-Fi</button>')
     parts.append("</form>")
     parts.append("</div>")
     parts.append("</details>")
