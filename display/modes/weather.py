@@ -26,16 +26,14 @@ _requests = None
 
 _last_fetch = 0
 _temperature = None   # current temp in F
+_feels_like = None     # apparent/feels-like temp in F
 _temp_high = None      # today's high
 _temp_low = None       # today's low
 _weather_code = None   # WMO weather code
 _needs_redraw = True
 _last_minute = -1  # track displayed minute for time updates
-_time_only_update = False  # True when only the clock changed, not weather data
 _prev_bottom_str = None  # previously drawn bottom text for incremental clear
 _prev_bottom_x = 0
-_prev_time_only = None   # previously drawn time_only text (when bottom bar is too wide)
-_prev_time_only_x = 0
 _lat = None
 _lon = None
 _location = ""
@@ -49,6 +47,7 @@ _drawn_temp_end_x = 0    # x after last large digit (for degree/F)
 _drawn_icon_key = None   # (icon_id, icon_color) tuple
 _drawn_hi_str = None
 _drawn_lo_str = None
+_drawn_feels_str = None  # e.g. "Feels Like 72"
 _drawn_loading = False   # True if loading screen is currently shown
 
 # WMO weather codes -> description and icon type
@@ -58,7 +57,7 @@ WMO_CODES = {
     2: "Partly Cloudy",
     3: "Overcast",
     45: "Fog",
-    48: "Rime Fog",
+    48: "Fog",
     51: "Light Drizzle",
     53: "Drizzle",
     55: "Heavy Drizzle",
@@ -234,6 +233,49 @@ def _measure_text(text):
     return w - 1 if w > 0 else 0
 
 
+def _char_width(ch):
+    """Return pixel width of a single 5x7 character."""
+    from font_data import FONT_5x7
+    glyph = FONT_5x7.get(ch, FONT_5x7.get(" "))
+    return len(glyph) if glyph else 4
+
+
+def _draw_text_3x5(x, y, text, color):
+    """Draw text using the compact 3x5 font."""
+    from font_data import FONT_3x5
+    for ch in text:
+        glyph = FONT_3x5.get(ch, FONT_3x5.get(" "))
+        if glyph is None:
+            x += 3
+            continue
+        w = len(glyph)
+        for col_i in range(w):
+            col_byte = glyph[col_i]
+            for row_i in range(5):
+                if col_byte & (1 << row_i):
+                    _set_pixel(x + col_i, y + row_i, color)
+        x += w + 1
+    return x
+
+
+def _measure_text_3x5(text):
+    """Measure text width in pixels using 3x5 font."""
+    from font_data import FONT_3x5
+    w = 0
+    for ch in text:
+        glyph = FONT_3x5.get(ch, FONT_3x5.get(" "))
+        if glyph:
+            w += len(glyph) + 1
+    return w - 1 if w > 0 else 0
+
+
+def _char_width_3x5(ch):
+    """Return pixel width of a single 3x5 character."""
+    from font_data import FONT_3x5
+    glyph = FONT_3x5.get(ch, FONT_3x5.get(" "))
+    return len(glyph) if glyph else 3
+
+
 def _draw_icon(x, y, icon, color):
     """Draw a pixel art icon."""
     for row_i, row_str in enumerate(icon):
@@ -330,7 +372,7 @@ def _geocode_zip(requests_session, zip_code):
 
 def _fetch_weather(requests_session):
     """Fetch current weather from Open-Meteo."""
-    global _temperature, _temp_high, _temp_low, _weather_code, _fetch_error
+    global _temperature, _feels_like, _temp_high, _temp_low, _weather_code, _fetch_error
     global _lat, _lon, _location, _tz_offset, _is_day
 
     if _lat is None:
@@ -340,7 +382,7 @@ def _fetch_weather(requests_session):
     url = (
         f"https://api.open-meteo.com/v1/forecast?"
         f"latitude={_lat}&longitude={_lon}"
-        f"&current=temperature_2m,weather_code,is_day"
+        f"&current=temperature_2m,apparent_temperature,weather_code,is_day"
         f"&daily=temperature_2m_max,temperature_2m_min"
         f"&temperature_unit=fahrenheit"
         f"&timezone=auto&forecast_days=1"
@@ -353,6 +395,7 @@ def _fetch_weather(requests_session):
 
         current = data.get("current", {})
         _temperature = current.get("temperature_2m")
+        _feels_like = current.get("apparent_temperature")
         _weather_code = current.get("weather_code")
         _is_day = bool(current.get("is_day", 1))
 
@@ -368,7 +411,7 @@ def _fetch_weather(requests_session):
         _temp_low = lows[0] if lows else None
 
         _fetch_error = False
-        print(f"Weather: {_temperature}F, code={_weather_code}, "
+        print(f"Weather: {_temperature}F, feels={_feels_like}F, code={_weather_code}, "
               f"hi={_temp_high} lo={_temp_low}, tz=UTC{_tz_offset:+d}")
     except Exception as e:
         print(f"Weather fetch error: {e}")
@@ -398,17 +441,17 @@ def update_config(zip_code=None, **kwargs):
 def setup(bitmap, palette, pool=None, **kwargs):
     """Initialize weather mode."""
     global _bitmap, _palette, _requests, _last_fetch
-    global _temperature, _temp_high, _temp_low, _weather_code
+    global _temperature, _feels_like, _temp_high, _temp_low, _weather_code
     global _lat, _lon, _location, _fetch_error, _needs_redraw
-    global _last_minute, _time_only_update, _prev_bottom_str, _prev_bottom_x
-    global _prev_time_only, _prev_time_only_x
+    global _last_minute, _prev_bottom_str, _prev_bottom_x
     global _drawn_temp_str, _drawn_temp_end_x, _drawn_icon_key
-    global _drawn_hi_str, _drawn_lo_str, _drawn_loading
+    global _drawn_hi_str, _drawn_lo_str, _drawn_feels_str, _drawn_loading
 
     _bitmap = bitmap
     _palette = palette
     _last_fetch = 0
     _temperature = None
+    _feels_like = None
     _temp_high = None
     _temp_low = None
     _weather_code = None
@@ -418,16 +461,14 @@ def setup(bitmap, palette, pool=None, **kwargs):
     _fetch_error = False
     _needs_redraw = True
     _last_minute = -1
-    _time_only_update = False
     _prev_bottom_str = None
     _prev_bottom_x = 0
-    _prev_time_only = None
-    _prev_time_only_x = 0
     _drawn_temp_str = None
     _drawn_temp_end_x = 0
     _drawn_icon_key = None
     _drawn_hi_str = None
     _drawn_lo_str = None
+    _drawn_feels_str = None
     _drawn_loading = False
 
     # Set up colors
@@ -469,7 +510,7 @@ def setup(bitmap, palette, pool=None, **kwargs):
 
 
 def _build_bottom_text():
-    """Build the bottom bar string (time - condition)."""
+    """Build the bottom bar string (time - condition) for 3x5 font."""
     condition = WMO_CODES.get(_weather_code, "Unknown")
     now_unix = time.time() + EPOCH_OFFSET
     tz = _tz_offset if _tz_offset is not None else int(os.getenv("CLOCK_TZ_OFFSET", "-5"))
@@ -485,72 +526,71 @@ def _build_bottom_text():
         h12 = 12
     time_str = f"{h12}:{mm:02d}{ampm}"
     bottom_str = f"{time_str} - {condition.upper()}"
-    bottom_w = _measure_text(bottom_str)
-    if bottom_w > WIDTH:
-        # Too wide: only show condition in bottom bar, time will be drawn elsewhere
-        return condition.upper(), _measure_text(condition.upper()), time_str
-    return bottom_str, bottom_w, None
-
-
-def _char_width(ch):
-    """Return pixel width of a single small character (glyph columns)."""
-    from font_data import FONT_5x7
-    glyph = FONT_5x7.get(ch, FONT_5x7.get(" "))
-    return len(glyph) if glyph else 4
+    bottom_w = _measure_text_3x5(bottom_str)
+    return bottom_str, bottom_w
 
 
 def _draw_bottom_text():
-    """Draw the bottom time/condition bar, clearing old text first."""
+    """Draw the bottom time/condition bar in 3x5 font, clearing old text first."""
     global _prev_bottom_str, _prev_bottom_x
-    global _prev_time_only, _prev_time_only_x
-    bottom_str, bottom_w, time_only = _build_bottom_text()
-    bottom_y = 24
+    bottom_str, bottom_w = _build_bottom_text()
     bottom_x = (WIDTH - bottom_w) // 2
 
-    bottom_changed = bottom_str != _prev_bottom_str or bottom_x != _prev_bottom_x
-    time_changed = time_only != _prev_time_only
-
-    if not bottom_changed and not time_changed:
+    if bottom_str == _prev_bottom_str and bottom_x == _prev_bottom_x:
         return  # nothing changed
 
-    # Redraw main bottom bar if changed
-    if bottom_changed:
-        old_str = _prev_bottom_str or ""
-        # Same length & same position: per-character diff (only redraw changed chars)
-        if len(old_str) == len(bottom_str) and bottom_x == _prev_bottom_x:
-            cx = bottom_x
-            for i in range(len(bottom_str)):
-                cw = _char_width(bottom_str[i])
-                if old_str[i] != bottom_str[i]:
-                    _clear_rect(cx, bottom_y, cw + 1, 7)  # +1 for gap
-                    _draw_small_text(cx, bottom_y, bottom_str[i], 5)
-                cx += cw + 1
-        else:
-            # Different length or position: full clear + redraw
-            if old_str:
-                prev_w = _measure_text(old_str)
-                _clear_rect(_prev_bottom_x, bottom_y, prev_w, 7)
-            _draw_small_text(bottom_x, bottom_y, bottom_str, 5)
-        _prev_bottom_str = bottom_str
-        _prev_bottom_x = bottom_x
+    old_str = _prev_bottom_str or ""
+    # Same length & same position: per-character diff (only redraw changed chars)
+    if len(old_str) == len(bottom_str) and bottom_x == _prev_bottom_x:
+        cx = bottom_x
+        for i in range(len(bottom_str)):
+            cw = _char_width_3x5(bottom_str[i])
+            if old_str[i] != bottom_str[i]:
+                _clear_rect(cx, _BOTTOM_Y, cw + 1, 5)  # +1 for gap
+                _draw_text_3x5(cx, _BOTTOM_Y, bottom_str[i], 5)
+            cx += cw + 1
+    else:
+        # Different length or position: full clear + redraw
+        if old_str:
+            prev_w = _measure_text_3x5(old_str)
+            _clear_rect(_prev_bottom_x, _BOTTOM_Y, prev_w, 5)
+        _draw_text_3x5(bottom_x, _BOTTOM_Y, bottom_str, 5)
+    _prev_bottom_str = bottom_str
+    _prev_bottom_x = bottom_x
 
-    # Handle separate time text (when condition is too wide for combined string)
-    if time_only is not None:
-        if time_changed:
-            time_x = 12  # same as icon left edge
-            # Clear previous time using OLD width
-            if _prev_time_only is not None:
-                old_time_w = _measure_text(_prev_time_only)
-                _clear_rect(_prev_time_only_x, 15, old_time_w, 7)
-            _draw_small_text(time_x, 15, time_only, 5)
-            _prev_time_only = time_only
-            _prev_time_only_x = time_x
-    elif _prev_time_only is not None:
-        # Condition shortened enough to fit — clear leftover time text
-        old_time_w = _measure_text(_prev_time_only)
-        _clear_rect(_prev_time_only_x, 15, old_time_w, 7)
-        _prev_time_only = None
-        _prev_time_only_x = 0
+
+def _draw_feels_like():
+    """Draw 'Feels Like XX' in 3x5 font below the icon/temp area."""
+    global _drawn_feels_str
+    if _feels_like is not None:
+        fl_int = int(round(_feels_like))
+        new_str = f"Feels Like {fl_int}"
+    else:
+        new_str = None
+
+    if new_str == _drawn_feels_str:
+        return  # nothing changed
+
+    old_str = _drawn_feels_str or ""
+
+    if new_str is not None and len(old_str) == len(new_str):
+        # Same length: per-character diff (only redraw changed chars)
+        cx = _FEELS_X
+        for i in range(len(new_str)):
+            cw = _char_width_3x5(new_str[i])
+            if old_str[i] != new_str[i]:
+                _clear_rect(cx, _FEELS_Y, cw + 1, 5)
+                _draw_text_3x5(cx, _FEELS_Y, new_str[i], 5)
+            cx += cw + 1
+    else:
+        # Different length or None transition: full clear + redraw
+        if old_str:
+            old_w = _measure_text_3x5(old_str)
+            _clear_rect(_FEELS_X, _FEELS_Y, old_w, 5)
+        if new_str is not None:
+            _draw_text_3x5(_FEELS_X, _FEELS_Y, new_str, 5)
+
+    _drawn_feels_str = new_str
 
 
 # Layout constants
@@ -564,14 +604,17 @@ _TEMP_LARGE_H = 14  # 7 rows * 2
 _HILO_X = 90
 _HI_Y = 3
 _LO_Y = 12
+_FEELS_X = 12    # same as icon left edge
+_FEELS_Y = 15    # below temp area, above bottom bar
+_BOTTOM_Y = 26   # 3x5 font is 5px tall → rows 26-30, fits in 32px
 
 
 def animate(bitmap):
     """Update weather display. Returns sleep time."""
-    global _last_fetch, _needs_redraw, _last_minute, _time_only_update
+    global _last_fetch, _needs_redraw, _last_minute
     global _drawn_temp_str, _drawn_temp_end_x, _drawn_icon_key
-    global _drawn_hi_str, _drawn_lo_str, _drawn_loading
-    global _prev_bottom_str, _prev_time_only
+    global _drawn_hi_str, _drawn_lo_str, _drawn_feels_str, _drawn_loading
+    global _prev_bottom_str
 
     now = time.monotonic()
 
@@ -580,7 +623,6 @@ def animate(bitmap):
         _last_fetch = now
         _fetch_weather(_requests)
         _needs_redraw = True
-        _time_only_update = False
 
     # Check if the minute changed - only bottom text needs updating
     now_unix = time.time() + EPOCH_OFFSET
@@ -592,20 +634,12 @@ def animate(bitmap):
     if cur_minute != _last_minute:
         _last_minute = cur_minute
         if not _needs_redraw:
-            _time_only_update = True
             _needs_redraw = True
 
     # Nothing to update
     if not _needs_redraw:
         return 0.5
     _needs_redraw = False
-
-    # If only the time changed, just redraw the bottom bar
-    if _time_only_update and _temperature is not None:
-        _time_only_update = False
-        _draw_bottom_text()
-        return 0.5
-    _time_only_update = False
 
     # --- Loading state ---
     if _temperature is None:
@@ -631,8 +665,8 @@ def animate(bitmap):
         _drawn_icon_key = None
         _drawn_hi_str = None
         _drawn_lo_str = None
+        _drawn_feels_str = None
         _prev_bottom_str = None
-        _prev_time_only = None
 
     # --- Left side: icon (12x12) ---
     new_icon_key = _get_icon_key(_weather_code, _is_day)
@@ -700,7 +734,10 @@ def animate(bitmap):
             _draw_small_text(_HILO_X, _LO_Y, new_lo_str, 7)
         _drawn_lo_str = new_lo_str
 
-    # --- Bottom: time - conditions text ---
+    # --- Feels like (3x5 font below temp area) ---
+    _draw_feels_like()
+
+    # --- Bottom: time - conditions text (3x5 font) ---
     _draw_bottom_text()
 
     return 0.5
